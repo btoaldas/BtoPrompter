@@ -77,6 +77,21 @@ enum VoiceProviderID: String, CaseIterable, Codable, Identifiable {
     // Clave de preferencias donde se guarda el modelo elegido por proveedor.
     var modelSettingKey: String { "sttModel_\(rawValue)" }
 
+    // Consentimiento POR PROVEEDOR: autorizar uno no autoriza a los demás.
+    var consentKey: String { "sttConsent_\(rawValue)" }
+    var hasCloudConsent: Bool {
+        guard !isLocal else { return true }
+        // Compatibilidad: el interruptor global anterior sigue valiendo como
+        // autorización explícita para los proveedores ya aceptados.
+        if UserDefaults.standard.object(forKey: consentKey) == nil {
+            return UserDefaults.standard.bool(forKey: "voiceCloudConsent")
+        }
+        return UserDefaults.standard.bool(forKey: consentKey)
+    }
+    func setCloudConsent(_ value: Bool) {
+        UserDefaults.standard.set(value, forKey: consentKey)
+    }
+
     var configuredModel: String {
         let stored = UserDefaults.standard.string(forKey: modelSettingKey) ?? ""
         return stored.isEmpty ? defaultModel : stored

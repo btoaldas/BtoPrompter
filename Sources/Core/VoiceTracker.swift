@@ -150,7 +150,7 @@ final class VoiceTracker {
         let id = order[orderIndex]
         orderIndex += 1
 
-        if !id.isLocal, !Settings.bool(.voiceCloudConsent, default: false) {
+        if !id.hasCloudConsent {
             skip(id, reason: "sin autorización para enviar audio fuera del Mac", generation: generation)
             return
         }

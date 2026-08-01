@@ -24,13 +24,29 @@ final class VoiceDiagnostics {
     var directoryURL: URL { rootURL }
     var currentSessionPath: String? { queue.sync { sessionURL?.path } }
 
+    private var pruneTimer: DispatchSourceTimer?
+
     private init() {
         try? fm.createDirectory(at: rootURL, withIntermediateDirectories: true,
                                 attributes: [.posixPermissions: 0o700])
         prune()
+        startPeriodicPrune()
+    }
+
+    // La poda también corre en caliente: una sesión larga con audio podía
+    // superar los límites de espacio sin que nadie los aplicara hasta cerrarla.
+    private func startPeriodicPrune() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 300, repeating: 300)
+        timer.setEventHandler { [weak self] in self?.prune() }
+        timer.resume()
+        pruneTimer = timer
     }
 
     func operational(_ level: String, _ message: String) {
+        // Con el diagnóstico apagado no se escribe nada al disco: antes este
+        // era el único método sin comprobación y el log crecía igualmente.
+        guard Settings.bool(.diagnosticsEnabled, default: false) || level == "ERROR" else { return }
         let sanitized = redact(message)
         queue.async {
             self.rotateOperationalLogIfNeeded()

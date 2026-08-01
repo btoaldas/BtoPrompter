@@ -12,6 +12,7 @@ struct ExternalProviderCard: View {
     @State private var expanded = false
     @State private var testing = false
     @State private var testResult: String? = nil
+    @State private var consent = false
 
     private var secretName: String { provider.secretName ?? "" }
     private var hasKey: Bool { !key.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -19,6 +20,9 @@ struct ExternalProviderCard: View {
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 8) {
+                Toggle("Autorizo enviar mi voz a \(provider.name)", isOn: $consent)
+                    .onChange(of: consent) { provider.setCloudConsent($0) }
+                    .font(.system(size: 11))
                 SecureField("API key de \(provider.name)", text: $key)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: key) { newValue in
@@ -83,7 +87,7 @@ struct ExternalProviderCard: View {
                     .font(.system(size: 11))
                 Text(provider.name)
                 Spacer()
-                Text(hasKey ? model : "sin clave")
+                Text(!consent ? "sin autorizar" : (hasKey ? model : "sin clave"))
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -91,6 +95,7 @@ struct ExternalProviderCard: View {
         .onAppear {
             key = SecretsStore.get(secretName)
             model = provider.configuredModel
+            consent = provider.hasCloudConsent
         }
     }
 

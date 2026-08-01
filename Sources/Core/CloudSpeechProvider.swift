@@ -24,6 +24,16 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         self.id = id
     }
 
+
+    // Idioma elegido por el usuario en Configuración → Voz, en el formato que
+    // espera cada proveedor (antes iba "es" cableado y el selector no servía).
+    static var languageTag: String {
+        Settings.string(.voiceLanguage, default: "es-EC")
+    }
+    static var languageShort: String {
+        String(languageTag.split(separator: "-").first ?? "es")
+    }
+
     // Comprobación de credenciales sin enviar audio: una petición REST barata
     // a un endpoint de solo lectura de cada proveedor.
     static func validateCredentials(provider: VoiceProviderID, apiKey: String,
@@ -100,7 +110,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
             components.queryItems = [
                 .init(name: "model_id", value: VoiceProviderID.elevenLabs.configuredModel),
                 .init(name: "audio_format", value: "pcm_16000"),
-                .init(name: "language_code", value: "es"),
+                .init(name: "language_code", value: Self.languageShort),
                 .init(name: "commit_strategy", value: "vad"),
                 .init(name: "vad_silence_threshold_secs", value: "0.8"),
             ]
@@ -111,7 +121,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
             var components = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
             components.queryItems = [
                 .init(name: "model", value: VoiceProviderID.deepgram.configuredModel),
-                .init(name: "language", value: "es"),
+                .init(name: "language", value: Self.languageShort),
                 .init(name: "encoding", value: "linear16"),
                 .init(name: "sample_rate", value: "16000"),
                 .init(name: "channels", value: "1"),
@@ -136,7 +146,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
                 "audio_format": "pcm_s16le",
                 "sample_rate": 16000,
                 "num_channels": 1,
-                "language_hints": ["es", "en"],
+                "language_hints": [Self.languageShort, "en"],
                 "enable_language_identification": true,
             ])
         case .assemblyAI:
@@ -157,7 +167,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
                 "message": "StartRecognition",
                 "audio_format": ["type": "raw", "encoding": "pcm_s16le", "sample_rate": 16000],
                 "transcription_config": [
-                    "language": "es", "operating_point": "enhanced",
+                    "language": Self.languageShort, "operating_point": "enhanced",
                     "enable_partials": true, "max_delay": 2.0,
                 ],
             ], confirmationEvent: "RecognitionStarted", timeout: 7)
@@ -228,7 +238,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "encoding": "wav/pcm", "sample_rate": 16000, "bit_depth": 16, "channels": 1,
             "model": VoiceProviderID.gladia.configuredModel,
-            "language_config": ["languages": ["es"]],
+            "language_config": ["languages": [Self.languageShort]],
             "messages_config": [
                 "receive_partial_transcripts": true,
                 "receive_final_transcripts": true,
