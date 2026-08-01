@@ -71,7 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 .environmentObject(store)
         )
         window.delegate = self
-        window.center()
+        // Encuadre inicial proporcional a la pantalla: centrado y arriba.
+        if let screen = window.screen ?? NSScreen.main {
+            window.setFrame(Theme.normalFrame(for: screen), display: false)
+        } else {
+            window.center()
+        }
         window.makeKeyAndOrderFront(nil)
 
         model.$spyMode
@@ -126,11 +131,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             for b in buttons { window.standardWindowButton(b)?.isHidden = true }
             PrompterModel.shared.miniContentWidth = max(200, vf.width - 360)
             window.contentView?.needsDisplay = true
-        } else if let saved = savedFrame {
-            window.setFrame(saved, display: true, animate: false)
+        } else {
+            // Al volver del modo mini se reencuadra SIEMPRE con la medida
+            // calculada. Reutilizar el marco anterior era frágil: si el aviso
+            // llegaba a mitad del cambio se guardaba un marco intermedio y la
+            // ventana volvía deformada, ocupando casi toda la pantalla.
             savedFrame = nil
             for b in buttons { window.standardWindowButton(b)?.isHidden = false }
+            window.setFrame(Theme.normalFrame(for: screen), display: true, animate: false)
+            window.contentView?.needsDisplay = true
         }
+    }
+
+    // Vuelve a encuadrar la ventana en el tamaño y sitio recomendados.
+    func resetWindowFrame() {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        window.setFrame(Theme.normalFrame(for: screen), display: true, animate: true)
     }
 
     @objc private func openSettings() {

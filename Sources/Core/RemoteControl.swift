@@ -185,6 +185,8 @@ final class RemoteControl: ObservableObject {
             if m.mode == .editing { m.startPrompter() }
         case "mic": m.voiceFollow.toggle()
         case "mini": m.toggleMiniMode()
+        case "reframe":
+            (NSApp.delegate as? AppDelegate)?.resetWindowFrame()
         case "opacityup": m.changeOpacity(+0.1)
         case "opacitydown": m.changeOpacity(-0.1)
         case "hide":
@@ -250,6 +252,7 @@ final class RemoteControl: ObservableObject {
             <button class="k" onclick="cmd('reset')">Reiniciar</button>
             <button class="k" onclick="cmd('mic')" id="mic">Microfono</button>
             <button class="k" onclick="cmd('mini')">Modo mini</button>
+            <button class="k" onclick="cmd('reframe')">Encuadrar</button>
             <button class="k" onclick="cmd('hide')">Minimizar</button>
             <button class="k" onclick="cmd('opacitydown')">Mas transparente</button>
             <button class="k" onclick="cmd('opacityup')">Menos transparente</button>

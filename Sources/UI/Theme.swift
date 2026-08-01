@@ -23,4 +23,17 @@ enum Theme {
     static let editorBackgroundOpacity = 0.94
     static let panelSize = NSSize(width: 980, height: 580)
     static let panelMinSize = NSSize(width: 640, height: 360)
+
+    // Encuadre del modo normal: proporcional a la pantalla (así se ve igual de
+    // bien en cualquier resolución), centrado en horizontal y pegado arriba,
+    // justo debajo de la barra de menú y del notch. Deja ver lo de detrás.
+    static func normalFrame(for screen: NSScreen) -> NSRect {
+        let vf = screen.visibleFrame
+        let width = min(max(panelMinSize.width, vf.width * 0.58), vf.width - 40)
+        let height = min(max(panelMinSize.height, vf.height * 0.62), vf.height - 20)
+        return NSRect(x: vf.minX + (vf.width - width) / 2,
+                      y: vf.maxY - height,
+                      width: width,
+                      height: height)
+    }
 }
