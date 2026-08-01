@@ -143,6 +143,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    // Al redimensionar a mano, la ventana se recentra horizontalmente y
+    // conserva su borde superior: crece y encoge hacia los dos lados y hacia
+    // abajo, en vez de irse a una esquina.
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard !PrompterModel.shared.miniMode,
+              let screen = window.screen ?? NSScreen.main else { return }
+        let vf = screen.visibleFrame
+        let frame = window.frame
+        let x = vf.minX + (vf.width - frame.width) / 2
+        let top = min(vf.maxY, max(frame.maxY, vf.minY + frame.height))
+        let target = NSRect(x: x, y: top - frame.height,
+                            width: frame.width, height: frame.height)
+        if abs(target.origin.x - frame.origin.x) > 1 || abs(target.origin.y - frame.origin.y) > 1 {
+            window.setFrame(target, display: true, animate: true)
+        }
+    }
+
     // Vuelve a encuadrar la ventana en el tamaño y sitio recomendados.
     func resetWindowFrame() {
         guard let screen = window.screen ?? NSScreen.main else { return }

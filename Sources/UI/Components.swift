@@ -122,6 +122,9 @@ struct StepperButton: View {
 
 struct SpyToggle: View {
     @EnvironmentObject var model: PrompterModel
+    // En ventanas estrechas se deja solo el ojo: el texto completo se
+    // recortaba y quedaba ilegible.
+    var compact: Bool = false
 
     var body: some View {
         Button {
@@ -129,12 +132,17 @@ struct SpyToggle: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: model.spyMode ? "eye.slash.fill" : "eye.fill")
-                Text(model.spyMode ? "Invisible al compartir" : "VISIBLE al compartir")
-                    .font(.system(size: 11, weight: .semibold))
+                if !compact {
+                    Text(model.spyMode ? "Invisible al compartir" : "VISIBLE al compartir")
+                        .font(.system(size: 11, weight: .semibold))
+                        .fixedSize()
+                }
             }
             .foregroundColor(model.spyMode ? Theme.spyOn : Theme.spyOff)
         }
         .buttonStyle(.plain)
-        .help("Con el ojo tachado, la ventana NO aparece en Zoom/Teams ni en capturas de pantalla")
+        .help(model.spyMode
+              ? "Invisible al compartir pantalla. Púlsalo para hacerla visible."
+              : "VISIBLE al compartir pantalla. Púlsalo para ocultarla en Zoom, Teams y capturas.")
     }
 }

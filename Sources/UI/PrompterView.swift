@@ -135,8 +135,9 @@ struct PrompterView: View {
 
     // MARK: Controles
 
-    private var controls: some View {
-        HStack(spacing: 16) {
+    // Piezas de la barra, para poder ofrecerla en varias densidades.
+    private var transportGroup: some View {
+        HStack(spacing: 8) {
             ControlButton(symbol: "gobackward", help: "Reiniciar (R)") { model.reset() }
             ControlButton(symbol: "backward.fill", help: "Atrás 10 palabras (←)") { model.skip(-10) }
             ControlButton(symbol: "backward.frame.fill", help: "Atrás 1 palabra (⇧←)", size: 13) { model.skip(-1) }
@@ -147,7 +148,8 @@ struct PrompterView: View {
             ControlButton(symbol: "forward.frame.fill", help: "Adelante 1 palabra (⇧→)", size: 13) { model.skip(+1) }
             ControlButton(symbol: "forward.fill", help: "Adelante 10 palabras (→)") { model.skip(+10) }
             ControlButton(symbol: "stop.fill", help: "Volver al editor (Esc)") { model.backToEditor() }
-            ControlButton(symbol: "menubar.dock.rectangle", help: "Modo minimalista: barra de 2 líneas arriba de la pantalla (M)") {
+            ControlButton(symbol: "menubar.dock.rectangle",
+                          help: "Modo minimalista: barra de 2 líneas arriba de la pantalla (M)") {
                 model.toggleMiniMode()
             }
             ControlButton(symbol: model.voiceFollow ? "mic.fill" : "mic.slash.fill",
@@ -160,52 +162,96 @@ struct PrompterView: View {
                 model.voiceFollow.toggle()
             }
             if model.voiceActive && Settings.bool(.diagnosticsRecordAudio, default: false) {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 7, height: 7)
+                Circle().fill(Color.red).frame(width: 7, height: 7)
                     .help("Grabando tu voz localmente para diagnóstico")
             }
-            Divider().frame(height: 18)
-            HStack(spacing: 4) {
-                ControlButton(symbol: "tortoise.fill", help: "Más lento (↓)", size: 13) {
-                    model.changeSpeed(-Settings.Limits.wpmStep)
-                }
-                Text("\(model.wpm)")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .frame(width: 32)
-                ControlButton(symbol: "hare.fill", help: "Más rápido (↑)", size: 13) {
-                    model.changeSpeed(+Settings.Limits.wpmStep)
-                }
-            }
-            HStack(spacing: 4) {
-                ControlButton(symbol: "textformat.size.smaller", help: "Letra más pequeña (−)", size: 13) {
-                    model.changeFont(-Settings.Limits.fontStep)
-                }
-                ControlButton(symbol: "textformat.size.larger", help: "Letra más grande (+)", size: 13) {
-                    model.changeFont(+Settings.Limits.fontStep)
-                }
-            }
-            HStack(spacing: 4) {
-                Image(systemName: "circle.dashed")
-                    .font(.system(size: 11))
-                    .foregroundColor(.gray)
-                Slider(value: $model.bgOpacity, in: 0.0...1.0)
-                    .frame(width: 80)
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(.gray)
-            }
-            .help("Opacidad del fondo: 0% = solo letras flotando ( [ y ] en teclado )")
-            Spacer()
-            Text("⌥⌘P ⏯ · ⌥⌘↑↓ velocidad")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(Theme.guide)
-                .help("Atajos GLOBALES: funcionan aunque estés en PowerPoint, Keynote o cualquier otra app")
-            SpyToggle()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+    }
+
+    private var speedGroup: some View {
+        HStack(spacing: 4) {
+            ControlButton(symbol: "tortoise.fill", help: "Más lento (↓)", size: 13) {
+                model.changeSpeed(-Settings.Limits.wpmStep)
+            }
+            Text("\(model.wpm)")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.gray)
+                .frame(width: 30)
+            ControlButton(symbol: "hare.fill", help: "Más rápido (↑)", size: 13) {
+                model.changeSpeed(+Settings.Limits.wpmStep)
+            }
+        }
+    }
+
+    private var fontGroup: some View {
+        HStack(spacing: 4) {
+            ControlButton(symbol: "textformat.size.smaller", help: "Letra más pequeña (−)", size: 13) {
+                model.changeFont(-Settings.Limits.fontStep)
+            }
+            ControlButton(symbol: "textformat.size.larger", help: "Letra más grande (+)", size: 13) {
+                model.changeFont(+Settings.Limits.fontStep)
+            }
+        }
+    }
+
+    private func opacityGroup(width: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "circle.dashed").font(.system(size: 11)).foregroundColor(.gray)
+            Slider(value: $model.bgOpacity, in: 0.0...1.0).frame(width: width)
+            Image(systemName: "circle.fill").font(.system(size: 11)).foregroundColor(.gray)
+        }
+        .help("Opacidad del fondo: 0% = solo letras flotando ( [ y ] en teclado )")
+    }
+
+    private var hotkeyHint: some View {
+        Text("⌥⌘P ⏯ · ⌥⌘↑↓ velocidad")
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundColor(Theme.guide)
+            .fixedSize()
+            .help("Atajos GLOBALES: funcionan aunque estés en PowerPoint, Keynote o cualquier otra app")
+    }
+
+    // La barra se ofrece en cuatro densidades y se muestra la que quepa, así
+    // los textos nunca aparecen recortados ni pegados unos a otros.
+    private var controls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                transportGroup
+                Divider().frame(height: 18)
+                speedGroup
+                fontGroup
+                opacityGroup(width: 80)
+                Spacer(minLength: 8)
+                hotkeyHint
+                SpyToggle(compact: false)
+            }
+            HStack(spacing: 10) {
+                transportGroup
+                Divider().frame(height: 18)
+                speedGroup
+                fontGroup
+                opacityGroup(width: 60)
+                Spacer(minLength: 6)
+                SpyToggle(compact: false)
+            }
+            HStack(spacing: 8) {
+                transportGroup
+                speedGroup
+                fontGroup
+                Spacer(minLength: 4)
+                SpyToggle(compact: true)
+            }
+            HStack(spacing: 6) {
+                transportGroup
+                speedGroup
+                Spacer(minLength: 2)
+                SpyToggle(compact: true)
+            }
+        }
+        .frame(height: 30)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
         .background(Color.white.opacity(0.05))
     }
+
 }
