@@ -12,13 +12,17 @@ final class PrompterModel: ObservableObject {
 
     enum Mode { case editing, prompting }
 
-    @Published var mode: Mode = .editing
+    @Published var mode: Mode = .editing {
+        didSet { RemoteControl.shared.broadcastIfRunning() }
+    }
     @Published var selectedID: UUID? {
         didSet { Settings.set(selectedID?.uuidString ?? "", .selectedID) }
     }
     @Published var chunks: [Chunk] = []
     @Published var currentIndex: Int = 0 {
         didSet {
+            // Los teléfonos que estén mostrando el guion siguen la posición.
+            RemoteControl.shared.broadcastIfRunning()
             guard mode == .prompting, currentIndex != oldValue else { return }
             // Alineación palabra↔audio para el análisis posterior.
             if let chunk = chunkAt(currentIndex) {
@@ -39,7 +43,9 @@ final class PrompterModel: ObservableObject {
             }
         }
     }
-    @Published var isPlaying: Bool = false
+    @Published var isPlaying: Bool = false {
+        didSet { RemoteControl.shared.broadcastIfRunning() }
+    }
     @Published var wpm: Int {
         didSet { Settings.set(wpm, .wpm) }
     }
@@ -77,7 +83,9 @@ final class PrompterModel: ObservableObject {
         didSet { Settings.set(autoPlay, .autoPlay) }
     }
     // Segundos restantes de la cuenta regresiva en curso (nil = sin conteo).
-    @Published var countdown: Int? = nil
+    @Published var countdown: Int? = nil {
+        didSet { RemoteControl.shared.broadcastIfRunning() }
+    }
     private var countdownWork: DispatchWorkItem?
 
     // Evitar que la pantalla se apague mientras el prompter está activo.
@@ -226,6 +234,7 @@ final class PrompterModel: ObservableObject {
     func startPrompter() {
         guard let doc = SpeechStore.shared.speech(selectedID) else { return }
         chunks = ScriptParser.parse(doc.body, guideTitles: guideTitles)
+        RemoteMirror.scriptChanged()
         guard totalWords > 0 else { return }
         // Guion normalizado por índice global, para el seguimiento por voz.
         var norm = [String](repeating: "", count: totalWords)

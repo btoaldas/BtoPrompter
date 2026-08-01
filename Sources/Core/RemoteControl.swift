@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Network
+import Security
 
 // Control remoto desde el teléfono: mini servidor HTTP en la red local con una
 // página de botones grandes (play/pausa, velocidad, saltos). Protegido con un
@@ -12,19 +13,47 @@ final class RemoteControl: ObservableObject {
     @Published var status: String? = nil
 
     private var listener: NWListener?
+    // Teléfonos escuchando el karaoke. Reciben la posición sin tener que
+    // preguntar, por una conexión que se queda abierta.
+    private var mirrorClients: [NWConnection] = []
+    private let mirrorLock = NSLock()
 
     var port: Int {
         get { Settings.int(.remotePort, default: 8737) }
         set { Settings.set(newValue, .remotePort) }
     }
 
+    // Código de acceso de 128 bits. Los 32 bits de antes eran adivinables por
+    // fuerza bruta en una red compartida, y ahora por aquí viaja el discurso
+    // entero, no solo órdenes de play y pausa.
     var token: String {
-        var t = Settings.string(.remoteToken, default: "")
-        if t.isEmpty {
-            t = String(UUID().uuidString.prefix(8)).lowercased()
-            Settings.set(t, .remoteToken)
-        }
-        return t
+        let stored = Settings.string(.remoteToken, default: "")
+        if stored.count >= 32 { return stored }
+        let fresh = Self.newToken()
+        Settings.set(fresh, .remoteToken)
+        return fresh
+    }
+
+    static func newToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    // Renueva el código: invalida al instante cualquier dispositivo conectado.
+    func regenerateToken() {
+        Settings.set(Self.newToken(), .remoteToken)
+        objectWillChange.send()
+    }
+
+    // Comparación en tiempo constante: comparar con == permite adivinar el
+    // código midiendo cuánto tarda en responder.
+    private func tokenMatches(_ candidate: String) -> Bool {
+        let a = Array(candidate.utf8), b = Array(token.utf8)
+        guard a.count == b.count else { return false }
+        var diff: UInt8 = 0
+        for i in 0..<a.count { diff |= a[i] ^ b[i] }
+        return diff == 0
     }
 
     // IP local (en0 típico en portátiles; recorre interfaces si no).
@@ -83,6 +112,7 @@ final class RemoteControl: ObservableObject {
     }
 
     func stop() {
+        closeMirrorClients()
         listener?.cancel()
         listener = nil
         running = false
@@ -98,17 +128,93 @@ final class RemoteControl: ObservableObject {
             let firstLine = request.split(separator: "\r\n").first ?? ""
             let parts = firstLine.split(separator: " ")
             let path = parts.count > 1 ? String(parts[1]) : "/"
+
+            // El canal del karaoke no se cierra: queda abierto recibiendo la
+            // posición. El resto de rutas responden y cierran, como siempre.
+            if let comps = URLComponents(string: path), comps.path == "/events" {
+                let given = comps.queryItems?.first(where: { $0.name == "t" })?.value ?? ""
+                guard self.tokenMatches(given) else {
+                    conn.send(content: self.httpResponse(status: "403 Forbidden",
+                                                         body: "código inválido", type: "text/plain"),
+                              completion: .contentProcessed { _ in conn.cancel() })
+                    return
+                }
+                self.beginMirrorStream(conn)
+                return
+            }
+
             let response = self.route(path)
             conn.send(content: response, completion: .contentProcessed { _ in conn.cancel() })
         }
+    }
+
+    // Abre el canal de eventos con un teléfono y le manda el estado actual.
+    private func beginMirrorStream(_ conn: NWConnection) {
+        let head = """
+        HTTP/1.1 200 OK\r
+        Content-Type: text/event-stream; charset=utf-8\r
+        Cache-Control: no-store\r
+        Connection: keep-alive\r
+        \r
+
+        """
+        conn.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
+        mirrorLock.lock()
+        mirrorClients.append(conn)
+        mirrorLock.unlock()
+        conn.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .cancelled, .failed:
+                self?.dropMirrorClient(conn)
+            default: break
+            }
+        }
+        sendToMirror(conn, event: RemoteMirror.stateJSON())
+    }
+
+    private func dropMirrorClient(_ conn: NWConnection) {
+        mirrorLock.lock()
+        mirrorClients.removeAll { $0 === conn }
+        mirrorLock.unlock()
+    }
+
+    private func sendToMirror(_ conn: NWConnection, event: String) {
+        let frame = "data: " + event + "\n\n"
+        conn.send(content: Data(frame.utf8), completion: .contentProcessed { [weak self] error in
+            if error != nil { self?.dropMirrorClient(conn) }
+        })
+    }
+
+    // Atajo seguro para llamar desde cualquier didSet del motor.
+    func broadcastIfRunning() {
+        guard running else { return }
+        broadcastState()
+    }
+
+    // Avisa a todos los teléfonos conectados. Se llama al cambiar de palabra.
+    func broadcastState() {
+        mirrorLock.lock()
+        let clients = mirrorClients
+        mirrorLock.unlock()
+        guard !clients.isEmpty else { return }
+        let payload = RemoteMirror.stateJSON()
+        for c in clients { sendToMirror(c, event: payload) }
+    }
+
+    private func closeMirrorClients() {
+        mirrorLock.lock()
+        let clients = mirrorClients
+        mirrorClients = []
+        mirrorLock.unlock()
+        for c in clients { c.cancel() }
     }
 
     private func route(_ path: String) -> Data {
         let comps = URLComponents(string: path)
         let query = comps?.queryItems ?? []
         let t = query.first(where: { $0.name == "t" })?.value ?? ""
-        guard t == token else {
-            return httpResponse(status: "403 Forbidden", body: "token inválido", type: "text/plain")
+        guard tokenMatches(t) else {
+            return httpResponse(status: "403 Forbidden", body: "código inválido", type: "text/plain")
         }
         let route = comps?.path ?? "/"
         switch route {
@@ -148,6 +254,9 @@ final class RemoteControl: ObservableObject {
                 }
             }
             return httpResponse(status: "200 OK", body: "ok", type: "text/plain")
+        case "/script":
+            return httpResponse(status: "200 OK", body: RemoteMirror.scriptJSON(),
+                                type: "application/json")
         case "/status":
             let m = PrompterModel.shared
             var json = ""
@@ -231,11 +340,22 @@ final class RemoteControl: ObservableObject {
         #st{color:#8e8e93;font-size:12px;margin-top:10px;min-height:16px}
         .hide{display:none}
         input{width:100%;padding:12px;border-radius:10px;border:1px solid #48484a;background:#1c1c1e;color:#fff;font-size:15px}
+        #guionbar{display:flex;gap:5px;justify-content:center;margin-bottom:8px;flex-wrap:wrap}
+        button.mini{font-size:13px;padding:9px 11px;border:none;border-radius:9px;background:#2c2c2e;color:#fff;font-weight:600}
+        #wrap{height:68vh;overflow:hidden;position:relative;text-align:left;background:#000;border-radius:12px;padding:10px}
+        #script{position:absolute;left:10px;right:10px;transition:transform .25s ease-out;font-size:26px;line-height:1.5;font-weight:600}
+        #script.mir{transform-origin:center;}
+        .w{color:#fff}.done{color:#ffffff52}.now{color:#ffd60a;text-decoration:underline}
+        .guide{color:#74c7ff;font-style:italic;display:block;margin:6px 0}
+        .h1{font-size:1.35em;font-weight:800;display:block;margin:8px 0}
+        .h2{font-size:1.15em;font-weight:800;display:block;margin:6px 0}
+        #warn{font-size:11px;color:#8e8e93;margin-top:8px}
         </style></head><body>
         <h1>BtoPrompter</h1>
         <div class="tabs">
           <button id="t1" class="on" onclick="tab(1)">Teleprompter</button>
           <button id="t2" onclick="tab(2)">Ordenador</button>
+          <button id="t3" onclick="tab(3)">Guion</button>
         </div>
 
         <div id="p1">
@@ -283,6 +403,19 @@ final class RemoteControl: ObservableObject {
           </div>
         </div>
 
+        <div id="p3" class="hide">
+          <div id="guionbar">
+            <button class="mini" onclick="cmd('toggle')">&#9199;</button>
+            <button class="mini" onclick="fs(-2)">A-</button>
+            <button class="mini" onclick="fs(2)">A+</button>
+            <button class="mini" onclick="mirror()">Espejo</button>
+            <button class="mini" onclick="cmd('back10')">-10</button>
+            <button class="mini" onclick="cmd('fwd10')">+10</button>
+          </div>
+          <div id="wrap"><div id="script"></div></div>
+          <div id="warn">Para que la pantalla no se apague: Ajustes &rarr; Pantalla y brillo &rarr; Bloqueo autom&aacute;tico &rarr; Nunca</div>
+        </div>
+
         <div id="st">&mdash;</div>
         <script>
         const T='\(token)';
@@ -298,10 +431,83 @@ final class RemoteControl: ObservableObject {
         function sendText(){const e=document.getElementById('txt');if(e.value){send('type',e.value);e.value=''}}
         function note(m){document.getElementById('st').textContent=m}
         function tab(n){
-          document.getElementById('p1').className = n===1?'':'hide';
-          document.getElementById('p2').className = n===2?'':'hide';
-          document.getElementById('t1').className = n===1?'on':'';
-          document.getElementById('t2').className = n===2?'on':'';
+          for(let k=1;k<=3;k++){
+            document.getElementById('p'+k).className = n===k?'':'hide';
+            document.getElementById('t'+k).className = n===k?'on':'';
+          }
+          if(n===3) loadScript();
+        }
+
+        // ---- Guion con karaoke ----
+        let SC=null, SPANS=[], LAST=-1, FS=26, MIR=false, REV=-1;
+        function fs(d){FS=Math.max(14,Math.min(64,FS+d));
+          document.getElementById('script').style.fontSize=FS+'px'; paint(LAST,true);}
+        function mirror(){MIR=!MIR;
+          document.getElementById('script').style.transform=
+            (MIR?'scaleX(-1) ':'')+'translateY('+CURY+'px)';}
+        let CURY=0;
+        async function loadScript(){
+          try{
+            const r=await fetch('/script?t='+T); SC=await r.json();
+            const box=document.getElementById('script');
+            box.innerHTML=''; SPANS=[];
+            for(const c of SC.chunks){
+              if(c.guide){
+                const g=document.createElement('span');
+                g.className='guide'; g.textContent='\u{25B8} '+c.text; box.appendChild(g);
+                continue;
+              }
+              const line=document.createElement('span');
+              line.className = c.style==='h1'?'h1':(c.style==='h2'?'h2':'');
+              c.words.forEach((w,k)=>{
+                const s=document.createElement('span');
+                s.className='w'; s.textContent=w+' ';
+                SPANS[c.from+k]=s; line.appendChild(s);
+              });
+              box.appendChild(line);
+              if(c.style==='normal'||c.style==='bullet') box.appendChild(document.createTextNode(' '));
+            }
+            LAST=-1; paint(0,true);
+          }catch(e){ document.getElementById('script').textContent='No se pudo cargar el guion'; }
+        }
+        function paint(i,force){
+          if(!SPANS.length||i==null) return;
+          if(i===LAST&&!force) return;
+          if(LAST>=0&&SPANS[LAST]) SPANS[LAST].className='w done';
+          for(let k=0;k<i;k++) if(SPANS[k]) SPANS[k].className='w done';
+          for(let k=i+1;k<SPANS.length;k++) if(SPANS[k]&&SPANS[k].className!=='w') SPANS[k].className='w';
+          const cur=SPANS[i];
+          if(cur){
+            cur.className='w now';
+            const wrap=document.getElementById('wrap');
+            CURY = wrap.clientHeight/2 - cur.offsetTop - cur.offsetHeight/2;
+            document.getElementById('script').style.transform=
+              (MIR?'scaleX(-1) ':'')+'translateY('+CURY+'px)';
+          }
+          LAST=i;
+        }
+
+        // ---- Canal en vivo: la posición llega sola ----
+        let ES=null;
+        function connect(){
+          if(ES) ES.close();
+          ES=new EventSource('/events?t='+T);
+          ES.onmessage=function(ev){
+            try{
+              const s=JSON.parse(ev.data);
+              if(SC && s.rev!==undefined && REV!==-1 && s.rev!==REV){ loadScript(); }
+              if(s.rev!==undefined) REV=s.rev;
+              paint(s.i);
+              show(s);
+            }catch(e){}
+          };
+          ES.onerror=function(){ setTimeout(connect,2000); };
+        }
+        function show(s){
+          document.getElementById('st').textContent =
+            (s.mode==='prompter'?(s.playing?'Leyendo ':'En pausa ')+(s.i+1)+'/'+s.total+' \u{00B7} '+s.wpm+' ppm':'En el editor')
+            + (s.voice?' \u{00B7} micro ON':'');
+          const mb=document.getElementById('mic'); if(mb) mb.style.background = s.voice? '#30d158' : '#2c2c2e';
         }
         (function(){
           const pad=document.getElementById('pad');
@@ -322,11 +528,7 @@ final class RemoteControl: ObservableObject {
             e.preventDefault();
           },{passive:false});
         })();
-        async function poll(){try{const r=await fetch('/status?t='+T);const s=await r.json();
-        document.getElementById('st').textContent=(s.mode==='prompter'?(s.playing?'Leyendo ':'En pausa ')+s.index+'/'+s.total+' · '+s.wpm+' ppm':'En el editor')+(s.voice?' · micro ON':'');
-        const mb=document.getElementById('mic'); if(mb) mb.style.background = s.voice? '#30d158' : '#2c2c2e';
-        }catch(e){}}
-        setInterval(poll,1500);poll();
+        connect();
         </script></body></html>
         """
     }
