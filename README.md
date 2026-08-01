@@ -18,6 +18,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🗂️ **Biblioteca de discursos** — guarda, organiza en carpetas, marca borradores, archiva o elimina. Todo con guardado automático.
 - 📥 **Importación** — texto (`.txt`), Markdown (`.md`), PowerPoint (`.pptx`, extrae el texto de las diapositivas) y audio (`.m4a`, `.mp3`, `.wav`…, transcrito con el motor de voz del sistema).
 - 🏷️ **Líneas guía** — líneas que empiezan con `//` (y opcionalmente los títulos `#`) se ven en azul como referencia ("Diapositiva 2 — mirar al público") pero el karaoke no las lee ni las cuenta.
+- ✨ **Ensayo con IA (opcional, apagado por defecto)** — un modelo de lenguaje marca el ritmo del discurso sin cambiar ninguna palabra: pausas (…), guías de actuación (`// Aquí más enfático`), signos de entonación y velocidades por tramo (`[v+20]`, `[v-30]`, `[v=]`). Compatible con Groq, OpenAI, OpenRouter o cualquier API estilo OpenAI con tu propia key. Estilos: conferencia, clase, dictado, motivacional o prompt personalizado. El resultado se guarda como discurso nuevo; el original queda intacto.
 - 🪟 **Transparencia 0–100 %** — al 0 % desaparece el fondo y solo quedan las letras flotando sobre tu presentación o tu audiencia.
 - 🎈 **No roba el foco** — es un panel no-activante: flota incluso sobre apps en pantalla completa y puedes hacer clic sin quitarle el teclado a tu presentación.
 - 🔠 **Tamaño de letra ajustable** en vivo.
@@ -66,6 +67,16 @@ open dist/BtoPrompter.app
 2. Ajusta la velocidad (ppm = palabras por minuto).
 3. **Iniciar** → entra al prompter en pausa; espacio para arrancar.
 4. Ajusta transparencia con `[` `]` para ver tu presentación detrás del texto.
+
+### Ensayo con IA
+
+En el editor, botón **IA…** → activa el interruptor, elige proveedor (Groq, OpenAI, OpenRouter o URL personalizada), pega **tu propia API key**, elige el estilo y pulsa **Preparar discurso**. Las marcas que genera son las mismas que puedes escribir a mano:
+
+- `palabra…` — pausa de respiración (el prompter espera más).
+- `// texto` — guía visible no leída (azul).
+- `[v+20]` / `[v-30]` / `[v=]` al inicio de línea — sube/baja la velocidad de ese tramo, o vuelve a la normal.
+
+La key se guarda solo en las preferencias locales de tu Mac; nunca sale del equipo salvo hacia el proveedor que tú configures.
 
 ### Notas sobre la invisibilidad
 

@@ -270,6 +270,114 @@ struct Chunk: Identifiable {
     let isParagraphEnd: Bool
     let style: ChunkStyle
     var isGuide: Bool = false   // se ve pero no se lee: el karaoke la salta
+    var speedDelta: Int = 0     // ajuste de ppm para este tramo (marcas [v+N]/[v-N])
+}
+
+// MARK: - Ensayo con IA
+// Marca el discurso con ritmo natural (pausas, énfasis, velocidades por tramo)
+// SIN cambiar ninguna palabra. Compatible con cualquier API estilo OpenAI
+// (Groq, OpenAI, OpenRouter o servidor propio). Parametrizable y apagado por defecto.
+
+struct AIRehearsal {
+    struct Provider {
+        let id: String
+        let name: String
+        let baseURL: String
+        let defaultModel: String
+    }
+
+    static let providers: [Provider] = [
+        Provider(id: "groq", name: "Groq", baseURL: "https://api.groq.com/openai/v1",
+                 defaultModel: "llama-3.3-70b-versatile"),
+        Provider(id: "openai", name: "OpenAI", baseURL: "https://api.openai.com/v1",
+                 defaultModel: "gpt-4o-mini"),
+        Provider(id: "openrouter", name: "OpenRouter", baseURL: "https://openrouter.ai/api/v1",
+                 defaultModel: "openai/gpt-4o-mini"),
+        Provider(id: "custom", name: "Personalizado", baseURL: "", defaultModel: ""),
+    ]
+
+    static let styles: [(id: String, name: String, hint: String)] = [
+        ("conferencia", "Conferencia formal",
+         "Ritmo sobrio y claro. Pausas marcadas entre ideas. Énfasis en cifras y conclusiones."),
+        ("clase", "Clase / docencia",
+         "Ritmo dinámico con preguntas retóricas al público. Baja la velocidad en definiciones y sube en ejemplos."),
+        ("dictado", "Dictado",
+         "Muy pausado: puntos suspensivos frecuentes para que la audiencia escriba. Repetir ritmo lento en datos clave."),
+        ("motivacional", "Motivacional",
+         "Enérgico: exclamaciones, subidas de velocidad en momentos altos y silencios dramáticos antes de frases clave."),
+        ("personalizado", "Personalizado", ""),
+    ]
+
+    static func systemPrompt(styleID: String, customPrompt: String) -> String {
+        let styleHint = styleID == "personalizado"
+            ? customPrompt
+            : (styles.first(where: { $0.id == styleID })?.hint ?? "")
+        return """
+        Eres un director de oratoria. Recibirás el texto de un discurso para un teleprompter.
+        Tu trabajo es marcarle el RITMO para que suene natural y elocuente, como habla una persona real.
+
+        REGLA ABSOLUTA: no cambies, añadas, quites ni reordenes NINGUNA palabra del discurso.
+        Las palabras deben quedar idénticas y en el mismo orden. Solo puedes:
+
+        1. Insertar puntos suspensivos pegados al final de una palabra ("palabra…") para crear pausas de respiración o de ritmo.
+        2. Ajustar signos de puntuación (comas, ¡exclamaciones!, ¿preguntas?) sin tocar las palabras: eso cambia la entonación y las esperas.
+        3. Insertar líneas nuevas que empiecen con "// " como guías de actuación que el orador ve pero no lee. Ejemplos: "// Aquí más enfático", "// Mirar al público", "// Silencio 2 segundos antes de seguir".
+        4. Insertar marcas de velocidad al INICIO de una línea para ese tramo: [v+20] más rápido, [v-30] más lento, [v=] volver a velocidad normal. Valores entre 10 y 60. Úsalas cuando el contenido lo pida: fluido en historias, lento en datos, rápido en entusiasmo.
+        5. Separar en párrafos donde ayude al ritmo (los saltos de línea no son palabras).
+
+        Estilo solicitado: \(styleHint)
+
+        Responde ÚNICAMENTE con el texto marcado. Sin explicaciones, sin comentarios, sin bloques de código.
+        """
+    }
+
+    static func run(text: String, baseURL: String, apiKey: String, model: String,
+                    styleID: String, customPrompt: String,
+                    completion: @escaping (Result<String, Error>) -> Void) {
+        guard let url = URL(string: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                                        .appending("/chat/completions")) else {
+            completion(.failure(NSError(domain: "BtoPrompter", code: 1,
+                                        userInfo: [NSLocalizedDescriptionKey: "URL base inválida"])))
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "model": model,
+            "temperature": 0.3,
+            "messages": [
+                ["role": "system", "content": systemPrompt(styleID: styleID, customPrompt: customPrompt)],
+                ["role": "user", "content": text],
+            ],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            guard let data else {
+                completion(.failure(NSError(domain: "BtoPrompter", code: 2,
+                                            userInfo: [NSLocalizedDescriptionKey: "Respuesta vacía"])))
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                let detail = String(data: data, encoding: .utf8)?.prefix(300) ?? ""
+                completion(.failure(NSError(domain: "BtoPrompter", code: status,
+                                            userInfo: [NSLocalizedDescriptionKey: "HTTP \(status): \(detail)"])))
+                return
+            }
+            completion(.success(content.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }.resume()
+    }
 }
 
 // Atajos globales del sistema (Carbon): funcionan aunque el foco esté en
@@ -355,6 +463,70 @@ final class PrompterModel: ObservableObject {
         didSet { UserDefaults.standard.set(guideTitles, forKey: "guideTitles") }
     }
 
+    // Ensayo con IA (parametrizable, apagado por defecto).
+    @Published var aiEnabled: Bool {
+        didSet { UserDefaults.standard.set(aiEnabled, forKey: "aiEnabled") }
+    }
+    @Published var aiProvider: String {
+        didSet { UserDefaults.standard.set(aiProvider, forKey: "aiProvider") }
+    }
+    @Published var aiModel: String {
+        didSet { UserDefaults.standard.set(aiModel, forKey: "aiModel") }
+    }
+    @Published var aiBaseURL: String {
+        didSet { UserDefaults.standard.set(aiBaseURL, forKey: "aiBaseURL") }
+    }
+    @Published var aiStyle: String {
+        didSet { UserDefaults.standard.set(aiStyle, forKey: "aiStyle") }
+    }
+    @Published var aiCustomPrompt: String {
+        didSet { UserDefaults.standard.set(aiCustomPrompt, forKey: "aiCustomPrompt") }
+    }
+    @Published var aiStatus: String? = nil
+    @Published var aiBusy: Bool = false
+
+    // Una key por proveedor: cambiar de proveedor no borra las demás.
+    func aiKey(for provider: String) -> String {
+        UserDefaults.standard.string(forKey: "aiKey_\(provider)") ?? ""
+    }
+    func setAIKey(_ key: String, for provider: String) {
+        UserDefaults.standard.set(key, forKey: "aiKey_\(provider)")
+    }
+
+    var aiEffectiveBaseURL: String {
+        if aiProvider == "custom" { return aiBaseURL }
+        return AIRehearsal.providers.first(where: { $0.id == aiProvider })?.baseURL ?? ""
+    }
+
+    func runAIRehearsal() {
+        guard let doc = SpeechStore.shared.speech(selectedID) else { return }
+        let key = aiKey(for: aiProvider)
+        guard !key.isEmpty, !aiEffectiveBaseURL.isEmpty, !aiModel.isEmpty else {
+            aiStatus = "Configura proveedor, modelo y API key."
+            return
+        }
+        aiBusy = true
+        aiStatus = "Marcando ritmo con IA…"
+        AIRehearsal.run(text: doc.body, baseURL: aiEffectiveBaseURL, apiKey: key,
+                        model: aiModel, styleID: aiStyle, customPrompt: aiCustomPrompt) { result in
+            DispatchQueue.main.async {
+                self.aiBusy = false
+                switch result {
+                case .success(let marked):
+                    let store = SpeechStore.shared
+                    let doc2 = SpeechDoc(title: doc.title + " (ensayo IA)", body: marked,
+                                         folder: doc.folder)
+                    store.library.speeches.insert(doc2, at: 0)
+                    store.saveNow()
+                    self.selectedID = doc2.id
+                    self.aiStatus = nil
+                case .failure(let error):
+                    self.aiStatus = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     var totalWords: Int { chunks.last?.range.upperBound ?? 0 }
 
     var currentChunkID: Int? {
@@ -379,6 +551,12 @@ final class PrompterModel: ObservableObject {
         if CommandLine.arguments.contains("--capturable") { spy = false }
         spyMode = spy
         guideTitles = d.object(forKey: "guideTitles") as? Bool ?? true
+        aiEnabled = d.object(forKey: "aiEnabled") as? Bool ?? false
+        aiProvider = d.string(forKey: "aiProvider") ?? "groq"
+        aiModel = d.string(forKey: "aiModel") ?? "llama-3.3-70b-versatile"
+        aiBaseURL = d.string(forKey: "aiBaseURL") ?? ""
+        aiStyle = d.string(forKey: "aiStyle") ?? "conferencia"
+        aiCustomPrompt = d.string(forKey: "aiCustomPrompt") ?? ""
         if let s = d.string(forKey: "selectedID"), let uuid = UUID(uuidString: s) {
             selectedID = uuid
         }
@@ -400,15 +578,31 @@ final class PrompterModel: ObservableObject {
             return out
         }
 
+        var currentDelta = 0
+        let speedMark = try! NSRegularExpression(pattern: "^\\[v([+-]\\d{1,2}|=)\\]\\s*")
+
         func appendChunk(_ sentence: String, style: ChunkStyle, paragraphEnd: Bool, guide: Bool = false) {
             let words = sentence.split(whereSeparator: { $0.isWhitespace }).map(String.init)
             guard !words.isEmpty else { return }
             // Las guías no aportan palabras leíbles: rango vacío, el karaoke las salta.
             let range = guide ? offset..<offset : offset..<(offset + words.count)
             result.append(Chunk(id: cid, words: words, range: range,
-                                isParagraphEnd: paragraphEnd, style: style, isGuide: guide))
+                                isParagraphEnd: paragraphEnd, style: style, isGuide: guide,
+                                speedDelta: guide ? 0 : currentDelta))
             cid += 1
             if !guide { offset += words.count }
+        }
+
+        // Marcas [v+N]/[v-N]/[v=] al inicio de línea: ajustan la velocidad del tramo.
+        func consumeSpeedMarks(_ line: String) -> String {
+            var out = line
+            while let m = speedMark.firstMatch(in: out, range: NSRange(out.startIndex..., in: out)),
+                  let full = Range(m.range, in: out), let val = Range(m.range(at: 1), in: out) {
+                let v = String(out[val])
+                currentDelta = v == "=" ? 0 : min(max(Int(v) ?? 0, -60), 60)
+                out.removeSubrange(full)
+            }
+            return out.trimmingCharacters(in: .whitespaces)
         }
 
         let lines = text
@@ -416,7 +610,9 @@ final class PrompterModel: ObservableObject {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        for line in lines {
+        for rawLine in lines {
+            let line = consumeSpeedMarks(rawLine)
+            if line.isEmpty { continue }
             if line.hasPrefix("//") {
                 let text = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
                 appendChunk(stripInline(text), style: .normal, paragraphEnd: true, guide: true)
@@ -520,7 +716,8 @@ final class PrompterModel: ObservableObject {
             if currentIndex >= totalWords - 1 { isPlaying = false }
             return
         }
-        let base = 60.0 / Double(wpm)
+        let effectiveWpm = min(max(60, wpm + (chunkAt(currentIndex)?.speedDelta ?? 0)), 400)
+        let base = 60.0 / Double(effectiveWpm)
         var multiplier = 1.0
         let word = wordAt(currentIndex)
         if let last = word.last {
@@ -536,8 +733,12 @@ final class PrompterModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + base * multiplier, execute: item)
     }
 
+    func chunkAt(_ index: Int) -> Chunk? {
+        chunks.first(where: { $0.range.contains(index) })
+    }
+
     private func wordAt(_ index: Int) -> String {
-        guard let chunk = chunks.first(where: { $0.range.contains(index) }) else { return "" }
+        guard let chunk = chunkAt(index) else { return "" }
         return chunk.words[index - chunk.range.lowerBound]
     }
 
@@ -759,9 +960,95 @@ struct SidebarView: View {
     }
 }
 
+struct AISheet: View {
+    @EnvironmentObject var model: PrompterModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var keyDraft: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Ensayo con IA", systemImage: "sparkles")
+                    .font(.system(size: 15, weight: .bold))
+                Spacer()
+                Toggle("Activar", isOn: $model.aiEnabled)
+                    .toggleStyle(.switch)
+            }
+            Text("La IA marca el ritmo del discurso — pausas (…), guías de actuación (//) y velocidades por tramo [v+20] — sin cambiar ninguna de tus palabras. El resultado se guarda como un discurso nuevo; el original queda intacto.")
+                .font(.system(size: 11))
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Picker("Proveedor", selection: $model.aiProvider) {
+                ForEach(AIRehearsal.providers, id: \.id) { p in
+                    Text(p.name).tag(p.id)
+                }
+            }
+            .onChange(of: model.aiProvider) { newValue in
+                if let p = AIRehearsal.providers.first(where: { $0.id == newValue }), p.id != "custom" {
+                    model.aiModel = p.defaultModel
+                }
+                keyDraft = model.aiKey(for: newValue)
+            }
+            if model.aiProvider == "custom" {
+                TextField("URL base (compatible OpenAI, ej. https://mi-servidor/v1)", text: $model.aiBaseURL)
+                    .textFieldStyle(.roundedBorder)
+            }
+            TextField("Modelo", text: $model.aiModel)
+                .textFieldStyle(.roundedBorder)
+            SecureField("API key del proveedor", text: $keyDraft)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { model.setAIKey(keyDraft, for: model.aiProvider) }
+
+            Picker("Estilo", selection: $model.aiStyle) {
+                ForEach(AIRehearsal.styles, id: \.id) { s in
+                    Text(s.name).tag(s.id)
+                }
+            }
+            if model.aiStyle == "personalizado" {
+                TextEditor(text: $model.aiCustomPrompt)
+                    .font(.system(size: 12))
+                    .frame(height: 60)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.4)))
+                    .overlay(alignment: .topLeading) {
+                        if model.aiCustomPrompt.isEmpty {
+                            Text("Describe cómo quieres que suene: ritmo, tono, dónde enfatizar…")
+                                .font(.system(size: 11)).foregroundColor(.gray)
+                                .padding(6).allowsHitTesting(false)
+                        }
+                    }
+            }
+
+            if let status = model.aiStatus {
+                HStack(spacing: 6) {
+                    if model.aiBusy { ProgressView().controlSize(.small) }
+                    Text(status).font(.system(size: 11)).foregroundColor(model.aiBusy ? .orange : .red)
+                }
+            }
+
+            HStack {
+                Button("Cerrar") { dismiss() }
+                Spacer()
+                Button {
+                    model.setAIKey(keyDraft, for: model.aiProvider)
+                    model.runAIRehearsal()
+                } label: {
+                    Label("Preparar discurso", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.aiEnabled || model.aiBusy || keyDraft.isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
+        .onAppear { keyDraft = model.aiKey(for: model.aiProvider) }
+    }
+}
+
 struct EditorPane: View {
     @EnvironmentObject var model: PrompterModel
     @EnvironmentObject var store: SpeechStore
+    @State var showAISheet = false
 
     private var titleBinding: Binding<String> {
         Binding(
@@ -836,6 +1123,12 @@ struct EditorPane: View {
                     }
                     .help("Velocidad en palabras por minuto")
                     Button {
+                        showAISheet = true
+                    } label: {
+                        Label(model.aiEnabled ? "Ensayo IA" : "IA…", systemImage: "sparkles")
+                    }
+                    .help("Ensayo con IA: marca el ritmo del discurso (pausas, énfasis, velocidades) sin cambiar tus palabras")
+                    Button {
                         model.startPrompter()
                     } label: {
                         Label("Iniciar", systemImage: "play.fill")
@@ -850,6 +1143,9 @@ struct EditorPane: View {
                     .foregroundColor(.gray)
             }
             .padding(16)
+            .sheet(isPresented: $showAISheet) {
+                AISheet().environmentObject(model)
+            }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "text.book.closed")
@@ -891,13 +1187,18 @@ struct PrompterView: View {
             HStack {
                 Text("\(model.currentIndex + 1) / \(model.totalWords)")
                 Spacer()
-                Text("~\(model.remainingTimeText) restante · \(model.wpm) ppm")
+                Text("~\(model.remainingTimeText) restante · \(model.wpm) ppm\(deltaText)")
             }
             .font(.system(size: 11, design: .monospaced))
             .foregroundColor(.gray)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
+    }
+
+    private var deltaText: String {
+        let d = model.chunkAt(model.currentIndex)?.speedDelta ?? 0
+        return d == 0 ? "" : String(format: " (%+d)", d)
     }
 
     private var scroller: some View {
@@ -1171,6 +1472,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.arguments.count > i + 1 {
     let url = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     print(SpeechStore.extractPPTX(url) ?? "ERROR: no se pudo extraer texto")
+    exit(0)
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--test-ai"), CommandLine.arguments.count > i + 1 {
+    let text = (try? String(contentsOfFile: CommandLine.arguments[i + 1], encoding: .utf8)) ?? ""
+    let d = UserDefaults.standard
+    let provider = d.string(forKey: "aiProvider") ?? "groq"
+    let base = provider == "custom"
+        ? (d.string(forKey: "aiBaseURL") ?? "")
+        : (AIRehearsal.providers.first(where: { $0.id == provider })?.baseURL ?? "")
+    let model = d.string(forKey: "aiModel") ?? "llama-3.3-70b-versatile"
+    let key = d.string(forKey: "aiKey_\(provider)") ?? ""
+    let style = d.string(forKey: "aiStyle") ?? "conferencia"
+    let sem = DispatchSemaphore(value: 0)
+    AIRehearsal.run(text: text, baseURL: base, apiKey: key, model: model,
+                    styleID: style, customPrompt: d.string(forKey: "aiCustomPrompt") ?? "") { result in
+        switch result {
+        case .success(let marked): print(marked)
+        case .failure(let error): print("ERROR: \(error.localizedDescription)")
+        }
+        sem.signal()
+    }
+    sem.wait()
     exit(0)
 }
 
