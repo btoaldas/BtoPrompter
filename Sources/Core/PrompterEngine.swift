@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import IOKit.pwr_mgt
 
 // Motor del prompter: estado global, transporte (play/pausa/saltos/velocidad),
 // avance del karaoke y orquestación del Ensayo con IA.
@@ -58,6 +59,19 @@ final class PrompterModel: ObservableObject {
     @Published var countdown: Int? = nil
     private var countdownWork: DispatchWorkItem?
 
+    // Evitar que la pantalla se apague mientras el prompter está activo.
+    @Published var keepAwake: Bool {
+        didSet {
+            Settings.set(keepAwake, .keepAwake)
+            updateSleepAssertion()
+        }
+    }
+    // Color del resaltado del karaoke (palabra actual).
+    @Published var accentColorID: String {
+        didSet { Settings.set(accentColorID, .accentColorID) }
+    }
+    private var sleepAssertion: IOPMAssertionID = 0
+
     // Ensayo con IA (parametrizable, apagado por defecto).
     @Published var aiEnabled: Bool {
         didSet { Settings.set(aiEnabled, .aiEnabled) }
@@ -95,6 +109,8 @@ final class PrompterModel: ObservableObject {
         miniFontSize = CGFloat(Settings.double(.miniFontSize, default: 20))
         countdownSeconds = Settings.int(.countdownSeconds, default: 3)
         autoPlay = Settings.bool(.autoPlay, default: false)
+        keepAwake = Settings.bool(.keepAwake, default: true)
+        accentColorID = Settings.string(.accentColorID, default: "amarillo")
         aiEnabled = Settings.bool(.aiEnabled, default: false)
         aiProvider = Settings.string(.aiProvider, default: "groq")
         aiModel = Settings.string(.aiModel, default: "llama-3.3-70b-versatile")
@@ -138,6 +154,7 @@ final class PrompterModel: ObservableObject {
         mode = .prompting
         NSApp.keyWindow?.makeFirstResponder(nil)
         GlobalHotKeys.shared.register()
+        updateSleepAssertion()
         if autoPlay { play() }
     }
 
@@ -145,6 +162,38 @@ final class PrompterModel: ObservableObject {
         pause()
         mode = .editing
         GlobalHotKeys.shared.unregister()
+        updateSleepAssertion()
+    }
+
+    // MARK: Pantalla despierta
+
+    func updateSleepAssertion() {
+        let shouldHold = keepAwake && mode == .prompting
+        if shouldHold && sleepAssertion == 0 {
+            IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString,
+                                        IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                        "BtoPrompter presentando" as CFString,
+                                        &sleepAssertion)
+        } else if !shouldHold && sleepAssertion != 0 {
+            IOPMAssertionRelease(sleepAssertion)
+            sleepAssertion = 0
+        }
+    }
+
+    // MARK: Marcadores: saltar a la n-ésima sección (títulos # / ##)
+
+    func jumpToSection(_ n: Int) {
+        let sections = chunks.filter { $0.style == .h1 || $0.style == .h2 }
+        guard n >= 1, n <= sections.count else { return }
+        let section = sections[n - 1]
+        if !section.isGuide {
+            jump(to: section.range.lowerBound)
+            return
+        }
+        // La sección es guía (no leíble): saltar al primer chunk leíble posterior.
+        if let next = chunks.first(where: { $0.id > section.id && !$0.isGuide }) {
+            jump(to: next.range.lowerBound)
+        }
     }
 
     func play() {
@@ -273,7 +322,12 @@ final class PrompterModel: ObservableObject {
         case 53: backToEditor(); return true        // esc
         default: break
         }
-        switch event.charactersIgnoringModifiers?.lowercased() {
+        let chars = event.charactersIgnoringModifiers?.lowercased()
+        if let c = chars, c.count == 1, let d = Int(c), d >= 1 {
+            jumpToSection(d)
+            return true
+        }
+        switch chars {
         case "r": reset(); return true
         case "m": toggleMiniMode(); return true
         case "+", "=": changeFont(+Settings.Limits.fontStep); return true

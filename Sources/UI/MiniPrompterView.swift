@@ -110,7 +110,7 @@ struct MiniPrompterView: View {
                 if g < model.currentIndex {
                     a.foregroundColor = Theme.dimmed
                 } else if g == model.currentIndex {
-                    a.foregroundColor = Theme.accent
+                    a.foregroundColor = Theme.highlight(model.accentColorID)
                     a.underlineStyle = .single
                 } else {
                     a.foregroundColor = .white

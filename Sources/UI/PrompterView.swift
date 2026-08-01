@@ -107,7 +107,7 @@ struct PrompterView: View {
             if g < model.currentIndex {
                 a.foregroundColor = Theme.dimmed
             } else if g == model.currentIndex {
-                a.foregroundColor = Theme.accent
+                a.foregroundColor = Theme.highlight(model.accentColorID)
                 a.underlineStyle = .single
             } else {
                 a.foregroundColor = chunk.style == .h1 || chunk.style == .h2 ? Theme.heading : .white

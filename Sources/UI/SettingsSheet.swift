@@ -57,12 +57,18 @@ struct GeneralSettingsTab: View {
                     Text("Opacidad del fondo: \(Int(model.bgOpacity * 100)) %")
                     Slider(value: $model.bgOpacity, in: 0...1)
                 }
+                Picker("Color del resaltado", selection: $model.accentColorID) {
+                    ForEach(Theme.highlights, id: \.id) { h in
+                        Text(h.name).foregroundColor(h.color).tag(h.id)
+                    }
+                }
             }
             Section("Comportamiento") {
                 Toggle("Invisible al compartir pantalla (modo espía)", isOn: $model.spyMode)
                 Toggle("Los títulos (#, ##) son guías que no se leen", isOn: $model.guideTitles)
                 Toggle("Recordar el modo minimalista entre sesiones", isOn: $model.miniMode)
                 Toggle("Reproducir automáticamente al entrar al prompter", isOn: $model.autoPlay)
+                Toggle("Mantener la pantalla despierta durante el prompter", isOn: $model.keepAwake)
                 Stepper(value: $model.countdownSeconds, in: 0...10) {
                     Text(model.countdownSeconds == 0
                          ? "Cuenta regresiva: desactivada"
@@ -70,7 +76,7 @@ struct GeneralSettingsTab: View {
                 }
             }
             Section("Atajos") {
-                Text("Prompter:  ␣ play/pausa · ← → ±10 palabras · ↑ ↓ velocidad · + − letra · [ ] transparencia · M modo mini · R reiniciar · Esc editor")
+                Text("Prompter:  ␣ play/pausa · ← → ±10 palabras · ⇧← ⇧→ ±1 palabra · 1–9 ir a sección · ↑ ↓ velocidad · + − letra · [ ] transparencia · M modo mini · R reiniciar · Esc editor")
                     .font(.system(size: 11)).foregroundColor(.gray)
                 Text("Globales (desde cualquier app, con el prompter activo):  ⌥⌘P play/pausa · ⌥⌘↑ ⌥⌘↓ velocidad")
                     .font(.system(size: 11)).foregroundColor(.gray)
