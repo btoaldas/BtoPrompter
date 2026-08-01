@@ -19,8 +19,17 @@ if CommandLine.arguments.contains("--test-sharing") {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     DispatchQueue.main.async {
-        let ok = MainActor.assumeIsolated { SelfTest.runSharingCheck() }
-        exit(ok ? 0 : 1)
+        // Dos intentos: una ventana ajena puede taparnos justo en el momento
+        // de la captura (Finder, notificaciones) y dar un falso negativo.
+        let first = MainActor.assumeIsolated { SelfTest.runSharingCheck() }
+        if first {
+            exit(0)
+        }
+        print("(reintento en 2 s: pudo taparnos otra ventana)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            let second = MainActor.assumeIsolated { SelfTest.runSharingCheck() }
+            exit(second ? 0 : 1)
+        }
     }
     app.run()
 }
