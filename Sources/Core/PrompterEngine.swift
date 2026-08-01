@@ -87,13 +87,21 @@ final class PrompterModel: ObservableObject {
     @Published var voiceFollow: Bool {
         didSet {
             Settings.set(voiceFollow, .voiceFollow)
-            guard mode == .prompting, isPlaying else { return }
             if voiceFollow {
-                pendingWork?.cancel()
-                VoiceTracker.shared.start()
+                if mode == .prompting, isPlaying {
+                    pendingWork?.cancel()
+                    VoiceTracker.shared.start()
+                } else {
+                    // Pedir permisos de una vez, para que el diálogo salga al
+                    // activar el toggle y no en plena presentación.
+                    VoiceTracker.shared.requestPermissions { _ in }
+                }
             } else {
+                let wasListening = voiceActive
                 VoiceTracker.shared.stop()
-                scheduleNext()
+                if mode == .prompting, isPlaying, wasListening {
+                    scheduleNext()
+                }
             }
         }
     }

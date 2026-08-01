@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import Speech
@@ -52,24 +53,46 @@ final class VoiceTracker {
     private var restartWork: DispatchWorkItem?
     private(set) var running = false
 
-    func start() {
-        guard !running else { return }
+    // Pide los dos permisos (voz y micrófono). Con permiso denegado guía al
+    // usuario a Ajustes del Sistema y abre el panel correspondiente.
+    func requestPermissions(_ completion: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { auth in
             DispatchQueue.main.async {
                 guard auth == .authorized else {
-                    PrompterModel.shared.voiceStatus = "Autoriza el reconocimiento de voz en Privacidad."
+                    PrompterModel.shared.voiceStatus =
+                        "Reconocimiento de voz denegado: actívalo en Ajustes → Privacidad → Reconocimiento de voz."
+                    Self.openPrivacyPane("Privacy_SpeechRecognition")
+                    completion(false)
                     return
                 }
                 AVCaptureDevice.requestAccess(for: .audio) { granted in
                     DispatchQueue.main.async {
                         guard granted else {
-                            PrompterModel.shared.voiceStatus = "Autoriza el micrófono en Privacidad."
+                            PrompterModel.shared.voiceStatus =
+                                "Micrófono denegado: actívalo en Ajustes → Privacidad → Micrófono."
+                            Self.openPrivacyPane("Privacy_Microphone")
+                            completion(false)
                             return
                         }
-                        self.begin()
+                        PrompterModel.shared.voiceStatus = nil
+                        completion(true)
                     }
                 }
             }
+        }
+    }
+
+    private static func openPrivacyPane(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func start() {
+        guard !running else { return }
+        requestPermissions { ok in
+            guard ok else { return }
+            self.begin()
         }
     }
 

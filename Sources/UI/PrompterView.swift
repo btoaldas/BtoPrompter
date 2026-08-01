@@ -150,9 +150,13 @@ struct PrompterView: View {
             ControlButton(symbol: "menubar.dock.rectangle", help: "Modo minimalista: barra de 2 líneas arriba de la pantalla (M)") {
                 model.toggleMiniMode()
             }
-            ControlButton(symbol: model.voiceActive ? "mic.fill" : "mic.slash.fill",
-                          help: "Seguirme por voz: el prompter avanza escuchándote (local, sin internet)",
-                          color: model.voiceActive ? Theme.spyOn : .gray) {
+            ControlButton(symbol: model.voiceFollow ? "mic.fill" : "mic.slash.fill",
+                          help: model.voiceActive
+                              ? "Escuchándote: el prompter avanza con tu voz"
+                              : (model.voiceFollow
+                                 ? "Seguimiento por voz activado: arrancará al dar play"
+                                 : "Seguirme por voz: el prompter avanza escuchándote (local, sin internet)"),
+                          color: model.voiceActive ? Theme.spyOn : (model.voiceFollow ? .orange : .gray)) {
                 model.voiceFollow.toggle()
             }
             Divider().frame(height: 18)

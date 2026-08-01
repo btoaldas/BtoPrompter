@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import Speech
 
 // Punto de entrada: flags de línea de comandos y arranque de la app.
 //   --capturable      arranca visible en capturas (para pruebas)
@@ -54,6 +56,36 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-ai"), CommandLine.argume
     }
     sem.wait()
     exit(0)
+}
+
+// Diagnóstico de permisos del seguimiento por voz.
+if CommandLine.arguments.contains("--mic-status") {
+    import_diag()
+    exit(0)
+}
+
+func import_diag() {
+    let mic: String
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: mic = "autorizado"
+    case .denied: mic = "DENEGADO"
+    case .restricted: mic = "restringido"
+    case .notDetermined: mic = "sin preguntar todavía"
+    @unknown default: mic = "?"
+    }
+    let speech: String
+    switch SFSpeechRecognizer.authorizationStatus() {
+    case .authorized: speech = "autorizado"
+    case .denied: speech = "DENEGADO"
+    case .restricted: speech = "restringido"
+    case .notDetermined: speech = "sin preguntar todavía"
+    @unknown default: speech = "?"
+    }
+    let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "es-ES"))
+    print("micrófono: \(mic)")
+    print("reconocimiento de voz: \(speech)")
+    print("reconocedor es-ES disponible: \(recognizer?.isAvailable == true)")
+    print("on-device: \(recognizer?.supportsOnDeviceRecognition == true)")
 }
 
 // Prueba de la actualización automática SIN instalar: descarga el último
