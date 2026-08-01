@@ -36,9 +36,17 @@ struct AIRehearsal {
     ]
 
     static func systemPrompt(styleID: String, customPrompt: String) -> String {
-        let styleHint = styleID == "personalizado"
-            ? customPrompt
-            : (styles.first(where: { $0.id == styleID })?.hint ?? "")
+        let extra = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var styleHint: String
+        if styleID == "personalizado" {
+            styleHint = extra
+        } else {
+            styleHint = styles.first(where: { $0.id == styleID })?.hint ?? ""
+            // El contexto extra (perfil del orador, notas propias) también se
+            // aplica a los estilos predefinidos: antes solo servía en el
+            // personalizado y el perfil aprendido se descartaba en silencio.
+            if !extra.isEmpty { styleHint += "\n\n" + extra }
+        }
         return """
         Eres un director de oratoria. Recibirás el texto de un discurso para un teleprompter.
         Tu trabajo es marcarle el RITMO para que suene natural y elocuente, como habla una persona real.

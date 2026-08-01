@@ -126,6 +126,16 @@ enum SelfTest {
                                                      failover: false) == [.gladia],
                "failover desactivado usa solo el proveedor elegido")
 
+        // El contexto extra (perfil del orador) debe llegar también a los
+        // estilos predefinidos, no solo al personalizado.
+        let perfil = "Perfil local del orador: 140 ppm."
+        expect(AIRehearsal.systemPrompt(styleID: "conferencia", customPrompt: perfil).contains(perfil),
+               "el perfil llega con estilo predefinido")
+        expect(AIRehearsal.systemPrompt(styleID: "personalizado", customPrompt: perfil).contains(perfil),
+               "el perfil llega con estilo personalizado")
+        expect(AIRehearsal.systemPrompt(styleID: "conferencia", customPrompt: "").contains("sobrio"),
+               "sin contexto extra el estilo predefinido se mantiene")
+
         // Marcas de diapositiva en guías.
         let t7 = ScriptParser.parse("// Diapositiva 2\nTexto normal.\n// mirar al público", guideTitles: true)
         expect(t7.first?.isSlideMark == true, "guía 'Diapositiva' detectada como marca")
