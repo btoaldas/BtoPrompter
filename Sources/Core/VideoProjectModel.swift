@@ -88,7 +88,32 @@ struct SegmentLayout: Codable, Equatable {
         case rect, rounded, circle
     }
 
+    init() {}
+
+    init(mode: Mode) {
+        self.mode = mode
+    }
+
+    // Los project.json anteriores no traen los campos nuevos: valores por
+    // defecto en vez de fallar.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .overlay
+        layerOrder = try c.decodeIfPresent([UUID].self, forKey: .layerOrder)
+        camRect = try c.decodeIfPresent(NRect.self, forKey: .camRect)
+            ?? NRect(x: 0.72, y: 0.62, width: 0.25, height: 0.34)
+        shape = try c.decodeIfPresent(Shape.self, forKey: .shape) ?? .circle
+        borderWidth = try c.decodeIfPresent(Double.self, forKey: .borderWidth) ?? 0.012
+        splitRatio = try c.decodeIfPresent(Double.self, forKey: .splitRatio) ?? 0.5
+        camera = try c.decodeIfPresent(SourceSettings.self, forKey: .camera) ?? SourceSettings()
+        screen = try c.decodeIfPresent(SourceSettings.self, forKey: .screen) ?? SourceSettings()
+    }
+
     var mode: Mode = .overlay
+    // Orden de dibujo de las capas EN ESTE TRAMO (ids, la última más arriba).
+    // nil = usar el orden global del proyecto. Así en un corte la capa A va
+    // encima y en el siguiente va debajo, sin duplicar nada.
+    var layerOrder: [UUID]? = nil
     // Ventana de la cámara en modo overlay (normalizada, origen arriba-izq).
     var camRect = NRect(x: 0.72, y: 0.62, width: 0.25, height: 0.34)
     var shape: Shape = .circle
@@ -231,6 +256,41 @@ struct VideoProject: Codable, Equatable {
         layouts[segmentIndex(at: seconds)]
     }
 
+    // Capas en el orden de dibujo del instante dado: el orden del tramo si lo
+    // tiene, el global si no. Capas ausentes de la lista van al final en su
+    // orden global (capas añadidas después de fijar el orden del tramo).
+    func orderedLayers(at seconds: Double) -> [ExtraLayer] {
+        let layout = layout(at: seconds)
+        guard let order = layout.layerOrder else { return extraLayers }
+        var byID = [UUID: ExtraLayer]()
+        for l in extraLayers { byID[l.id] = l }
+        var result: [ExtraLayer] = []
+        for id in order {
+            if let l = byID.removeValue(forKey: id) { result.append(l) }
+        }
+        result.append(contentsOf: extraLayers.filter { byID[$0.id] != nil })
+        return result
+    }
+
+    // Mueve una capa a la posición dada (0 = fondo) SOLO en el tramo indicado.
+    // La primera vez congela el orden global como orden del tramo.
+    mutating func setLayerPosition(_ id: UUID, to position: Int, inSegment seg: Int) {
+        guard layouts.indices.contains(seg) else { return }
+        var order = layouts[seg].layerOrder ?? extraLayers.map(\.id)
+        guard let from = order.firstIndex(of: id) else { return }
+        order.remove(at: from)
+        order.insert(id, at: min(max(0, position), order.count))
+        layouts[seg].layerOrder = order
+    }
+
+    // Mueve una capa en el orden GLOBAL (todo el vídeo) y limpia el orden
+    // particular de los tramos que la contengan igual que el global.
+    mutating func setLayerPositionGlobal(_ id: UUID, to position: Int) {
+        guard let from = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        let layer = extraLayers.remove(at: from)
+        extraLayers.insert(layer, at: min(max(0, position), extraLayers.count))
+    }
+
     // Rango [inicio, fin) del tramo i.
     func segmentRange(_ i: Int) -> (start: Double, end: Double) {
         let start = i == 0 ? 0 : cuts[i - 1]
@@ -291,6 +351,14 @@ struct VideoProject: Codable, Equatable {
         while p.layouts.count > p.cuts.count + 1 { p.layouts.removeLast() }
         p.layouts = p.layouts.map { $0.sanitized() }
         p.extraLayers = p.extraLayers.map { $0.sanitized(duration: p.duration) }
+        // Órdenes por tramo: fuera los ids de capas que ya no existen.
+        let alive = Set(p.extraLayers.map(\.id))
+        for i in p.layouts.indices {
+            if let order = p.layouts[i].layerOrder {
+                let cleaned = order.filter { alive.contains($0) }
+                p.layouts[i].layerOrder = cleaned.isEmpty ? nil : cleaned
+            }
+        }
         return p
     }
 }

@@ -99,11 +99,46 @@ struct LiveCanvasOverlay: View {
     }
 
     private func layerMenu(_ i: Int, _ layer: ExtraLayer) -> some View {
-        Group {
-            Button("Traer al frente") { swapLayer(i, +1) }
-                .disabled(i == state.project.extraLayers.count - 1)
-            Button("Enviar atrás") { swapLayer(i, -1) }
-                .disabled(i == 0)
+        let segIdx = state.project.segmentIndex(at: playhead)
+        let count = state.project.extraLayers.count
+        // Posición actual de la capa EN el orden del tramo bajo el cursor.
+        let orderNow = state.project.orderedLayers(at: playhead).map(\.id)
+        let posNow = orderNow.firstIndex(of: layer.id) ?? i
+        return Group {
+            Section("Solo en este tramo") {
+                Button("Traer al frente") {
+                    changePos(layer.id, to: count - 1, segment: segIdx)
+                }
+                .disabled(posNow == count - 1)
+                Button("Traer adelante") { changePos(layer.id, to: posNow + 1, segment: segIdx) }
+                    .disabled(posNow == count - 1)
+                Button("Enviar atrás") { changePos(layer.id, to: posNow - 1, segment: segIdx) }
+                    .disabled(posNow == 0)
+                Button("Enviar al fondo") { changePos(layer.id, to: 0, segment: segIdx) }
+                    .disabled(posNow == 0)
+                if count > 2 {
+                    Menu("Posición…") {
+                        ForEach(0..<count, id: \.self) { pos in
+                            Button("\(pos + 1) de \(count)"
+                                   + (pos == posNow ? " ✓" : "")) {
+                                changePos(layer.id, to: pos, segment: segIdx)
+                            }
+                        }
+                    }
+                }
+            }
+            Section("En todo el vídeo") {
+                Button("Traer al frente en todo") {
+                    var p = state.project
+                    p.setLayerPositionGlobal(layer.id, to: count - 1)
+                    state.project = p
+                }
+                Button("Enviar al fondo en todo") {
+                    var p = state.project
+                    p.setLayerPositionGlobal(layer.id, to: 0)
+                    state.project = p
+                }
+            }
             Button(layer.behindCamera ? "Delante de la cámara" : "Detrás de la cámara") {
                 mutateLayer(i) { $0.behindCamera.toggle() }
             }
@@ -131,11 +166,11 @@ struct LiveCanvasOverlay: View {
         }
     }
 
-    private func swapLayer(_ i: Int, _ delta: Int) {
+    // El orden del clic derecho es POR TRAMO: en este corte la capa va
+    // arriba, en el siguiente puede ir abajo. "En todo el vídeo" usa el global.
+    private func changePos(_ id: UUID, to position: Int, segment: Int) {
         var p = state.project
-        let j = i + delta
-        guard i >= 0, i < p.extraLayers.count, j >= 0, j < p.extraLayers.count else { return }
-        p.extraLayers.swapAt(i, j)
+        p.setLayerPosition(id, to: position, inSegment: segment)
         state.project = p
     }
 

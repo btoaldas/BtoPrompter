@@ -111,7 +111,8 @@ class PiPCompositor: NSObject, AVVideoCompositing {
             // Fotograma de cada capa visible en este instante: los vídeos
             // salen de su pista; las imágenes, de la cache de decodificación.
             var layerImages: [UUID: CIImage] = [:]
-            for layer in project.extraLayers where layer.isVisible(at: seconds) {
+            let ordered = project.orderedLayers(at: seconds)
+            for layer in ordered where layer.isVisible(at: seconds) {
                 switch layer.kind {
                 case .video:
                     if let tid = instruction.layerTracks[layer.id],
@@ -126,7 +127,7 @@ class PiPCompositor: NSObject, AVVideoCompositing {
             let image = FrameComposer.compose(screen: screen, camera: camera,
                                               layout: layout, background: project.background,
                                               canvas: size, seconds: seconds,
-                                              extraLayers: project.extraLayers,
+                                              extraLayers: ordered,
                                               layerImages: layerImages)
             self.context.render(image, to: out)
             request.finish(withComposedVideoFrame: out)

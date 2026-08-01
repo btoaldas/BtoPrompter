@@ -196,6 +196,29 @@ enum SelfTest {
             expect(false, "project.json v1 carga con capas vacías")
         }
 
+        // Orden de capas por tramo: cada corte con su propio arriba/abajo.
+        var zp = VideoProject()
+        zp.duration = 10
+        _ = zp.addCut(at: 5)
+        let cA = ExtraLayer(kind: .image, path: "/tmp/a.png", name: "A")
+        let cB = ExtraLayer(kind: .image, path: "/tmp/b.png", name: "B")
+        zp.extraLayers = [cA, cB]
+        expect(zp.orderedLayers(at: 2).map(\.name) == ["A", "B"],
+               "sin orden propio rige el global")
+        zp.setLayerPosition(cA.id, to: 1, inSegment: 1)
+        expect(zp.orderedLayers(at: 7).map(\.name) == ["B", "A"],
+               "el tramo 2 invierte el orden")
+        expect(zp.orderedLayers(at: 2).map(\.name) == ["A", "B"],
+               "el tramo 1 conserva el global")
+        let cC = ExtraLayer(kind: .image, path: "/tmp/c.png", name: "C")
+        zp.extraLayers.append(cC)
+        expect(zp.orderedLayers(at: 7).map(\.name) == ["B", "A", "C"],
+               "capa nueva entra al final del orden del tramo")
+        zp.extraLayers.removeFirst()   // muere A
+        let zps = zp.sanitized()
+        expect(zps.layouts[1].layerOrder?.contains(cA.id) != true,
+               "el saneo limpia ids muertos del orden del tramo")
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",
