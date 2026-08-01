@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // Pruebas rápidas del parser, sin frameworks: `BtoPrompter --selftest`.
@@ -143,5 +144,78 @@ enum SelfTest {
 
         print(failures.isEmpty ? "SELFTEST OK" : "SELFTEST FALLÓ: \(failures.count)")
         return failures.isEmpty
+    }
+
+    // Comprobación de la invisibilidad al compartir pantalla. Se ejecuta con
+    // `--test-sharing` y debe pasar antes de publicar cualquier versión: es la
+    // seña de identidad de la app y un descuido la rompería en silencio.
+    //
+    // Levanta dos ventanas de color idéntico, una excluida de las capturas y
+    // otra no, hace una captura del sistema y mira el píxel del centro de cada
+    // una. La excluida debe mostrar el escritorio; la otra, su color.
+    @MainActor
+    static func runSharingCheck() -> Bool {
+        let color = NSColor.systemPink
+        func makeWindow(hidden: Bool, x: CGFloat) -> NSWindow {
+            let w = NSWindow(contentRect: NSRect(x: x, y: 200, width: 220, height: 220),
+                             styleMask: [.borderless], backing: .buffered, defer: false)
+            w.backgroundColor = color
+            w.isOpaque = true
+            w.level = .statusBar
+            w.sharingType = hidden ? .none : .readOnly
+            w.orderFrontRegardless()
+            return w
+        }
+        let hiddenWindow = makeWindow(hidden: true, x: 100)
+        let visibleWindow = makeWindow(hidden: false, x: 400)
+        NSApp.activate(ignoringOtherApps: true)
+        defer {
+            hiddenWindow.orderOut(nil)
+            visibleWindow.orderOut(nil)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+
+        guard let screen = NSScreen.main else { return false }
+
+        // Se captura el rectángulo exacto de cada ventana, en coordenadas de
+        // pantalla (origen arriba-izquierda), y se mira el color medio.
+        func averageColor(of window: NSWindow) -> NSColor? {
+            let f = window.frame
+            let rect = CGRect(x: f.minX + 40, y: screen.frame.height - f.maxY + 40,
+                              width: f.width - 80, height: f.height - 80)
+            guard let img = CGWindowListCreateImage(rect, .optionAll, kCGNullWindowID,
+                                                    [.bestResolution]) else { return nil }
+            let bitmap = NSBitmapImageRep(cgImage: img)
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+            var samples = 0
+            for x in stride(from: 0, to: bitmap.pixelsWide, by: max(1, bitmap.pixelsWide / 8)) {
+                for y in stride(from: 0, to: bitmap.pixelsHigh, by: max(1, bitmap.pixelsHigh / 8)) {
+                    guard let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                    r += c.redComponent; g += c.greenComponent; b += c.blueComponent
+                    samples += 1
+                }
+            }
+            guard samples > 0 else { return nil }
+            return NSColor(deviceRed: r / CGFloat(samples), green: g / CGFloat(samples),
+                           blue: b / CGFloat(samples), alpha: 1)
+        }
+        func isPink(_ c: NSColor?) -> Bool {
+            guard let c, let ref = color.usingColorSpace(.deviceRGB) else { return false }
+            return abs(c.redComponent - ref.redComponent) < 0.2
+                && abs(c.greenComponent - ref.greenComponent) < 0.2
+                && abs(c.blueComponent - ref.blueComponent) < 0.2
+        }
+
+        let hiddenColor = averageColor(of: hiddenWindow)
+        let visibleColor = averageColor(of: visibleWindow)
+        let hiddenPink = isPink(hiddenColor)
+        let visiblePink = isPink(visibleColor)
+        print(hiddenPink ? "✗ la ventana invisible SÍ salió en la captura"
+                         : "✓ la ventana invisible no aparece en la captura")
+        print(visiblePink ? "✓ la ventana de control sí aparece (la captura funciona)"
+                          : "✗ la ventana de control no apareció: la captura no es fiable")
+        let ok = !hiddenPink && visiblePink
+        print(ok ? "INVISIBILIDAD OK" : "INVISIBILIDAD FALLÓ")
+        return ok
     }
 }

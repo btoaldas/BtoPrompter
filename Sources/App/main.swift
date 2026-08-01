@@ -13,6 +13,18 @@ if CommandLine.arguments.contains("--selftest") {
     exit(SelfTest.run() ? 0 : 1)
 }
 
+// Comprobación de la invisibilidad al compartir pantalla. Necesita interfaz,
+// así que arranca la app en segundo plano y sale con el resultado.
+if CommandLine.arguments.contains("--test-sharing") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    DispatchQueue.main.async {
+        let ok = MainActor.assumeIsolated { SelfTest.runSharingCheck() }
+        exit(ok ? 0 : 1)
+    }
+    app.run()
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.arguments.count > i + 1 {
     let url = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     print(SpeechStore.extractPPTX(url) ?? "ERROR: no se pudo extraer texto")

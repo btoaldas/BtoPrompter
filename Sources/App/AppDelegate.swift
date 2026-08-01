@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.minSize = Theme.panelMinSize
         window.level = .statusBar
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.sharingType = model.spyMode ? .none : .readOnly
+        applySharingType()
         window.contentView = NSHostingView(
             rootView: ContentView()
                 .environmentObject(model)
@@ -81,8 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         model.$spyMode
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] spy in
-                self?.window.sharingType = spy ? .none : .readOnly
+            .sink { [weak self] _ in
+                self?.applySharingType()
             }
             .store(in: &cancellables)
 
@@ -113,6 +113,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 model.play()
             }
         }
+    }
+
+    // ÚNICO punto del programa que escribe `sharingType`. La invisibilidad al
+    // compartir pantalla es la seña de identidad de la app: si varias partes
+    // pudieran tocarla, bastaría un olvido para que el guion apareciera en una
+    // videollamada. Quien quiera cambiarla mueve `spyMode` y pasa por aquí.
+    private func applySharingType() {
+        window.sharingType = PrompterModel.shared.spyMode ? .none : .readOnly
     }
 
     private var savedFrame: NSRect?
