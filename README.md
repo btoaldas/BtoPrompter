@@ -123,6 +123,10 @@ El vídeo se divide en **tramos de tiempo** y cada tramo tiene su propia receta:
 - **Fondo del vídeo**: color fijo, degradado de dos colores, o **imagen** (expandida, adaptada, estirada, mosaico o centrada).
 - **Presets** con teclas 1–6 que aplican una receta completa al tramo seleccionado.
 
+- **Orden de capas por tramo**: en un corte la capa A encima y en el siguiente al revés — clic derecho sobre el componente: traer al frente/adelante/atrás/al fondo o «Posición…» 1..N, solo en ese tramo o en todo el vídeo.
+- **Transiciones**: cada tramo puede entrar con fundido desde el anterior (o corte seco, el valor por defecto), 100–2000 ms.
+- **Audio**: volumen del micrófono, y **audios tuyos** (música de fondo, efectos) con volumen, recorte del archivo (usar del minuto 1 al 3 de un MP3) y posición exacta en el vídeo.
+- **Cortes arrastrables**: los marcadores de la línea de tiempo se agarran y se mueven, con imán a segundos enteros.
 - **N capas tuyas**: añade los vídeos e imágenes que quieras encima del montaje. Cada capa tiene su posición, su tamaño (escalado o **deformado**), su recorte, su forma, su opacidad, su orden (cuál va delante de cuál, incluso detrás de la cámara flotante) y **sus tiempos**: aparece y desaparece en los segundos que tú decidas, las veces que quieras.
 - **Fuentes propias**: sustituye la pantalla o la cámara grabadas por un vídeo tuyo (o aporta la que falte).
 - **Selector de proyectos**: abre cualquier grabación o proyecto anterior, no solo el último. Y **«Nuevo desde vídeos…»** monta un proyecto desde vídeos sueltos sin grabar nada (el primero es la base, el resto entran como capas; no se copian, se referencian).

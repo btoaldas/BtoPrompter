@@ -341,7 +341,9 @@ struct VideoEditorView: View {
             buildGeneration += 1
             let gen = buildGeneration
             let saved = VideoProjectStore.load(folder: folder, duration: 0)
-            let built = try await CompositionBuilder.build(sources, extraLayers: saved.extraLayers)
+            let built = try await CompositionBuilder.build(sources, extraLayers: saved.extraLayers,
+                                                           audioLayers: saved.audioLayers,
+                                                           micVolume: saved.micVolume)
             guard gen == buildGeneration else { return }
             composition = built.composition
             videoComposition = built.video
@@ -353,6 +355,7 @@ struct VideoEditorView: View {
 
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.video
+            item.audioMix = built.audioMix
             let p2 = AVPlayer(playerItem: item)
             timeObserver = p2.addPeriodicTimeObserver(
                 forInterval: CMTime(value: 1, timescale: 10), queue: .main
@@ -382,7 +385,9 @@ struct VideoEditorView: View {
         do {
             let freshSources = CompositionBuilder.sources(inFolder: folder)
             let src = freshSources ?? sources
-            let built = try await CompositionBuilder.build(src, extraLayers: state.project.extraLayers)
+            let built = try await CompositionBuilder.build(src, extraLayers: state.project.extraLayers,
+                                                           audioLayers: state.project.audioLayers,
+                                                           micVolume: state.project.micVolume)
             // Otro rebuild arrancó mientras este esperaba: el viejo se calla
             // en vez de terminar último y pisar al nuevo.
             guard gen == buildGeneration else { return }
@@ -393,6 +398,7 @@ struct VideoEditorView: View {
             state.project = proj.sanitized()
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.video
+            item.audioMix = built.audioMix
             player?.replaceCurrentItem(with: item)
             await player?.seek(to: CMTime(seconds: min(keep, built.duration), preferredTimescale: 600),
                                toleranceBefore: .zero, toleranceAfter: .zero)
@@ -446,10 +452,13 @@ struct VideoEditorView: View {
                 // flushSave ya persistió los cambios, así que sources() los ve.
                 let src = CompositionBuilder.sources(inFolder: folder) ?? sources
                 let built = try await CompositionBuilder.build(src,
-                                                               extraLayers: snapshot.extraLayers)
+                                                               extraLayers: snapshot.extraLayers,
+                                                               audioLayers: snapshot.audioLayers,
+                                                               micVolume: snapshot.micVolume)
                 built.video.customVideoCompositorClass = ExportCompositor.self
                 exportSession = CompositionExporter.export(
                     composition: built.composition, video: built.video,
+                    audioMix: built.audioMix,
                     to: url, progress: { exportProgress = $0 }) { result in
                     exporting = false
                     exportSession = nil
@@ -612,6 +621,9 @@ struct SegmentInspector: View {
                 Divider()
                 LayersSection(state: state, playhead: $playhead,
                               onStructureChange: onStructureChange)
+                Divider()
+                AudioSection(state: state, playhead: $playhead,
+                             onStructureChange: onStructureChange)
                 Divider()
                 SourceOverrideSection(state: state,
                                       discoveredCamera: discoveredCamera,

@@ -456,3 +456,132 @@ struct LayersSection: View {
         }
     }
 }
+
+// MARK: - Capas de audio
+
+// Música de fondo, efectos, cualquier audio del usuario: volumen, recorte del
+// archivo (desde qué segundo se lee) y posición en el proyecto. El volumen
+// del micrófono (audio de la cámara) también vive aquí.
+struct AudioSection: View {
+    @ObservedObject var state: VideoProjectState
+    @Binding var playhead: Double
+    let onStructureChange: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Audio").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("＋ Audio") { addAudio() }.font(.system(size: 10))
+            }
+            HStack {
+                Image(systemName: "mic").font(.system(size: 10))
+                Text("Micrófono").font(.caption)
+                Slider(value: Binding(
+                    get: { state.project.micVolume },
+                    set: { v in state.project.micVolume = v; scheduleRebuild() }
+                ), in: 0...1)
+                Text("\(Int(state.project.micVolume * 100))%")
+                    .font(.system(size: 9, design: .monospaced))
+                    .frame(width: 32)
+            }
+            ForEach(Array(state.project.audioLayers.enumerated()), id: \.element.id) { i, audio in
+                audioRow(i, audio)
+            }
+        }
+    }
+
+    private func audioRow(_ i: Int, _ audio: AudioLayer) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Image(systemName: "music.note").font(.system(size: 10))
+                Text(audio.name).font(.caption).lineLimit(1)
+                if !FileManager.default.fileExists(atPath: audio.path) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9)).foregroundStyle(.orange)
+                }
+                Spacer()
+                Button(action: { removeAudio(i) }) { Image(systemName: "trash") }
+                    .buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.red)
+            }
+            HStack(spacing: 4) {
+                Text("Vol").font(.system(size: 9))
+                Slider(value: bindAudio(i, \.volume), in: 0...1).frame(width: 70)
+                Text("archivo desde").font(.system(size: 9))
+                numText(bindAudio(i, \.sourceStart))
+                Text("s · en el vídeo desde").font(.system(size: 9))
+                numText(bindAudio(i, \.projectStart))
+                Text("s").font(.system(size: 9))
+            }
+            HStack(spacing: 4) {
+                Text("duración").font(.system(size: 9))
+                numText(bindAudio(i, \.duration))
+                Text("s (0 = hasta el final)").font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.12)))
+    }
+
+    // Cambios de audio SIEMPRE reconstruyen (las pistas y el mix viven en la
+    // composición), con calma para no reconstruir por cada tick de slider.
+    @State private var rebuildWork: DispatchWorkItem? = nil
+
+    private func scheduleRebuild() {
+        rebuildWork?.cancel()
+        let work = DispatchWorkItem { onStructureChange() }
+        rebuildWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    private func bindAudio(_ i: Int, _ kp: WritableKeyPath<AudioLayer, Double>) -> Binding<Double> {
+        Binding(
+            get: {
+                guard i < state.project.audioLayers.count else { return 0 }
+                return state.project.audioLayers[i][keyPath: kp]
+            },
+            set: { v in
+                var p = state.project
+                guard i < p.audioLayers.count else { return }
+                p.audioLayers[i][keyPath: kp] = v
+                state.project = p
+                scheduleRebuild()
+            }
+        )
+    }
+
+    private func numText(_ value: Binding<Double>) -> some View {
+        TextField("", text: Binding(
+            get: { String(format: "%.1f", value.wrappedValue) },
+            set: { s in
+                if let v = Double(s.replacingOccurrences(of: ",", with: ".")) {
+                    value.wrappedValue = max(0, v)
+                }
+            }
+        ))
+        .frame(width: 42)
+        .font(.system(size: 9, design: .monospaced))
+        .textFieldStyle(.roundedBorder)
+    }
+
+    private func addAudio() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var layer = AudioLayer(path: url.path,
+                               name: url.deletingPathExtension().lastPathComponent)
+        layer.projectStart = playhead
+        var p = state.project
+        p.audioLayers.append(layer)
+        state.project = p
+        onStructureChange()
+    }
+
+    private func removeAudio(_ i: Int) {
+        var p = state.project
+        guard i < p.audioLayers.count else { return }
+        p.audioLayers.remove(at: i)
+        state.project = p
+        onStructureChange()
+    }
+}

@@ -59,10 +59,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
             } else {
                 print("tramos: \(project.layouts.count) (cortes en \(project.cuts))")
             }
-            let built = try await CompositionBuilder.build(sources, extraLayers: project.extraLayers)
+            let built = try await CompositionBuilder.build(sources, extraLayers: project.extraLayers,
+                                                           audioLayers: project.audioLayers,
+                                                           micVolume: project.micVolume)
             project.duration = built.duration
             CompositionParameters.shared.project = project.sanitized()
             CompositionExporter.export(composition: built.composition, video: built.video,
+                                       audioMix: built.audioMix,
                                        to: out, progress: { _ in }) { result in
                 switch result {
                 case .success(let url):

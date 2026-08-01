@@ -532,8 +532,10 @@ enum CompositionBuilder {
     // Composición alineada y recortada a la pista más corta. La regla dura:
     // las instrucciones deben teselar [0, duración] sin huecos ni solapes, o
     // la exportación revienta con -11841 (aquí: una sola instrucción total).
-    static func build(_ src: Sources, extraLayers: [ExtraLayer] = []) async throws
-        -> (composition: AVMutableComposition, video: AVMutableVideoComposition, duration: Double) {
+    static func build(_ src: Sources, extraLayers: [ExtraLayer] = [],
+                      audioLayers: [AudioLayer] = [], micVolume: Double = 1.0) async throws
+        -> (composition: AVMutableComposition, video: AVMutableVideoComposition,
+            duration: Double, audioMix: AVAudioMix?) {
         let screenAsset = src.screenURL.map { AVURLAsset(url: $0) }
         let cameraAsset = src.cameraURL.map { AVURLAsset(url: $0) }
 
@@ -579,12 +581,49 @@ enum CompositionBuilder {
             cameraID = vCamera.trackID
         }
 
-        // El audio vive en el archivo de cámara.
+        // El audio del micrófono vive en el archivo de cámara, con su volumen.
+        var mixParams: [AVMutableAudioMixInputParameters] = []
         if let audio = try await cameraAsset?.loadTracks(withMediaType: .audio).first {
             let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
             try aTrack.insertTimeRange(
                 CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),
                 of: audio, at: .zero)
+            let params = AVMutableAudioMixInputParameters(track: aTrack)
+            params.setVolume(Float(micVolume), at: .zero)
+            mixParams.append(params)
+        }
+
+        // Audios del usuario: cada uno es una pista más, con su volumen, su
+        // recorte del archivo (sourceStart) y su sitio en el proyecto
+        // (projectStart). Un archivo ausente o sin audio no revienta nada.
+        for layer in audioLayers {
+            guard FileManager.default.fileExists(atPath: layer.path) else { continue }
+            let asset = AVURLAsset(url: URL(fileURLWithPath: layer.path))
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+                  let assetDur = try? await asset.load(.duration).seconds else { continue }
+            let start = min(max(0, layer.projectStart), usable)
+            let availableInAsset = assetDur - layer.sourceStart
+            let availableInProject = usable - start
+            var length = min(availableInAsset, availableInProject)
+            if layer.duration > 0 { length = min(length, layer.duration) }
+            guard length > 0.05 else { continue }
+            let aTrack = comp.addMutableTrack(withMediaType: .audio,
+                                              preferredTrackID: kCMPersistentTrackID_Invalid)!
+            try? aTrack.insertTimeRange(
+                CMTimeRange(start: CMTime(seconds: layer.sourceStart, preferredTimescale: 600),
+                            duration: CMTime(seconds: length, preferredTimescale: 600)),
+                of: track, at: CMTime(seconds: start, preferredTimescale: 600))
+            let params = AVMutableAudioMixInputParameters(track: aTrack)
+            params.setVolume(Float(layer.volume), at: .zero)
+            mixParams.append(params)
+        }
+        let audioMix: AVMutableAudioMix?
+        if mixParams.isEmpty {
+            audioMix = nil
+        } else {
+            let m = AVMutableAudioMix()
+            m.inputParameters = mixParams
+            audioMix = m
         }
 
         // Cada capa de VÍDEO del usuario es una pista más. Arranca en su
@@ -618,7 +657,7 @@ enum CompositionBuilder {
             timeRange: CMTimeRange(start: .zero, duration: duration),
             screenTrack: screenID, cameraTrack: cameraID,
             layerTracks: layerTracks)]
-        return (comp, video, usable)
+        return (comp, video, usable, audioMix)
     }
 }
 
@@ -631,6 +670,7 @@ enum CompositionExporter {
     @discardableResult
     static func export(composition: AVMutableComposition,
                        video: AVMutableVideoComposition,
+                       audioMix: AVAudioMix? = nil,
                        to url: URL,
                        progress: @escaping (Double) -> Void,
                        done: @escaping (Result<URL, Error>) -> Void) -> AVAssetExportSession? {
@@ -641,6 +681,7 @@ enum CompositionExporter {
             return nil
         }
         session.videoComposition = video
+        session.audioMix = audioMix
         session.outputURL = url
         session.outputFileType = .mp4
         try? FileManager.default.removeItem(at: url)
