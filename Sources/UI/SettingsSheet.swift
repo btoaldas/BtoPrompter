@@ -463,7 +463,28 @@ struct RemoteTab: View {
                     }
                     Button("Comprobar") { trusted = RemoteInput.isTrusted }
                         .font(.system(size: 11))
+                    if !trusted {
+                        Button("Reiniciar la app") { RemoteInput.relaunchApp() }
+                            .font(.system(size: 11))
+                    }
                 }
+                if !trusted {
+                    Text("Si ya lo activaste en Ajustes y sigue en naranja, reinicia la app: macOS solo aplica este permiso al arrancar. Y si aparece activado pero no funciona, quítalo y vuelve a añadirlo — al actualizar la app cambia su firma y el permiso anterior deja de valer.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("Invertir el sentido vertical del puntero", isOn: .init(
+                    get: { Settings.bool(.remoteInvertPointer, default: false) },
+                    set: { Settings.set($0, .remoteInvertPointer) }
+                ))
+                .font(.system(size: 11))
+                Toggle("Invertir el sentido del desplazamiento (dos dedos)", isOn: .init(
+                    get: { Settings.bool(.remoteInvertScroll, default: false) },
+                    set: { Settings.set($0, .remoteInvertScroll) }
+                ))
+                .font(.system(size: 11))
             }
             Divider()
 

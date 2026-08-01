@@ -23,6 +23,21 @@ enum RemoteInput {
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 
+    // macOS solo aplica el permiso de Accesibilidad al arrancar el proceso:
+    // tras concederlo hay que relanzar para que surta efecto.
+    static func relaunchApp() {
+        // Se abre la copia nueva DESPUÉS de que esta muera, para no chocar con
+        // la regla de instancia única.
+        let path = Bundle.main.bundleURL.path
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; open \"\(path)\""]
+        try? task.run()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSApp.terminate(nil)
+        }
+    }
+
     static func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)

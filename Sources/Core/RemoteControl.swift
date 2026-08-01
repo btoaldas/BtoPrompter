@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Network
 
@@ -131,13 +132,17 @@ final class RemoteControl: ObservableObject {
             let value = query.first(where: { $0.name == "v" })?.value ?? ""
             let dx = Double(query.first(where: { $0.name == "dx" })?.value ?? "") ?? 0
             let dy = Double(query.first(where: { $0.name == "dy" })?.value ?? "") ?? 0
+            // El sentido vertical es preferencia del usuario: hay quien espera
+            // que el dedo arrastre el contenido y quien espera que mueva el cursor.
+            let pointerSign: Double = Settings.bool(.remoteInvertPointer, default: false) ? -1 : 1
+            let scrollSign: Double = Settings.bool(.remoteInvertScroll, default: false) ? -1 : 1
             DispatchQueue.main.async {
                 switch kind {
                 case "key": RemoteInput.key(value)
                 case "click": RemoteInput.click(value.isEmpty ? "left" : value)
                 case "dblclick": RemoteInput.click("left", double: true)
-                case "move": RemoteInput.movePointer(dx: dx, dy: dy)
-                case "scroll": RemoteInput.scroll(dx: Int(dx), dy: Int(dy))
+                case "move": RemoteInput.movePointer(dx: dx, dy: dy * pointerSign)
+                case "scroll": RemoteInput.scroll(dx: Int(dx), dy: Int(dy * scrollSign))
                 case "type": RemoteInput.type(value)
                 default: break
                 }
@@ -148,7 +153,7 @@ final class RemoteControl: ObservableObject {
             var json = ""
             DispatchQueue.main.sync {
                 json = """
-                {"playing": \(m.isPlaying), "index": \(m.currentIndex), "total": \(m.totalWords), "wpm": \(m.wpm), "mode": "\(m.mode == .prompting ? "prompter" : "editor")"}
+                {"playing": \(m.isPlaying), "index": \(m.currentIndex), "total": \(m.totalWords), "wpm": \(m.wpm), "voice": \(m.voiceActive), "mode": "\(m.mode == .prompting ? "prompter" : "editor")"}
                 """
             }
             return httpResponse(status: "200 OK", body: json, type: "application/json")
@@ -170,7 +175,26 @@ final class RemoteControl: ObservableObject {
         case "back10": m.skip(-10)
         case "fwd10": m.skip(+10)
         case "reset": m.reset()
-        case "start": if m.mode == .editing { m.startPrompter() }
+        case "start":
+            // Trae la ventana al frente aunque estuviera minimizada o detrás.
+            NSApp.activate(ignoringOtherApps: true)
+            if let w = NSApp.windows.first {
+                if w.isMiniaturized { w.deminiaturize(nil) }
+                w.makeKeyAndOrderFront(nil)
+            }
+            if m.mode == .editing { m.startPrompter() }
+        case "mic": m.voiceFollow.toggle()
+        case "mini": m.toggleMiniMode()
+        case "opacityup": m.changeOpacity(+0.1)
+        case "opacitydown": m.changeOpacity(-0.1)
+        case "hide":
+            if let w = NSApp.windows.first { w.miniaturize(nil) }
+        case "show":
+            NSApp.activate(ignoringOtherApps: true)
+            if let w = NSApp.windows.first {
+                if w.isMiniaturized { w.deminiaturize(nil) }
+                w.makeKeyAndOrderFront(nil)
+            }
         default: break
         }
     }
@@ -214,6 +238,8 @@ final class RemoteControl: ObservableObject {
 
         <div id="p1">
           <div class="grid">
+            <button class="k" onclick="cmd('start')">Iniciar</button>
+            <button class="k" onclick="cmd('show')">Traer al frente</button>
             <button class="k big" onclick="cmd('toggle')">Play / Pausa</button>
             <button class="k" onclick="cmd('slower')">Mas lento</button>
             <button class="k" onclick="cmd('faster')">Mas rapido</button>
@@ -222,7 +248,11 @@ final class RemoteControl: ObservableObject {
             <button class="k" onclick="cmd('back1')">-1</button>
             <button class="k" onclick="cmd('fwd1')">+1</button>
             <button class="k" onclick="cmd('reset')">Reiniciar</button>
-            <button class="k" onclick="cmd('start')">Iniciar</button>
+            <button class="k" onclick="cmd('mic')" id="mic">Microfono</button>
+            <button class="k" onclick="cmd('mini')">Modo mini</button>
+            <button class="k" onclick="cmd('hide')">Minimizar</button>
+            <button class="k" onclick="cmd('opacitydown')">Mas transparente</button>
+            <button class="k" onclick="cmd('opacityup')">Menos transparente</button>
           </div>
         </div>
 
@@ -280,8 +310,8 @@ final class RemoteControl: ObservableObject {
           pad.addEventListener('touchmove',function(e){
             const t=e.touches[0]; const dx=t.clientX-lx, dy=t.clientY-ly;
             lx=t.clientX; ly=t.clientY; moved+=Math.abs(dx)+Math.abs(dy);
-            if(e.touches.length>1) send('scroll','',Math.round(-dx),Math.round(dy));
-            else send('move','',Math.round(dx*1.8),Math.round(-dy*1.8));
+            if(e.touches.length>1) send('scroll','',Math.round(-dx),Math.round(-dy));
+            else send('move','',Math.round(dx*1.8),Math.round(dy*1.8));
             e.preventDefault();
           },{passive:false});
           pad.addEventListener('touchend',function(e){
@@ -290,7 +320,9 @@ final class RemoteControl: ObservableObject {
           },{passive:false});
         })();
         async function poll(){try{const r=await fetch('/status?t='+T);const s=await r.json();
-        document.getElementById('st').textContent=(s.mode==='prompter'?(s.playing?'Leyendo ':'En pausa ')+s.index+'/'+s.total+' · '+s.wpm+' ppm':'En el editor');}catch(e){}}
+        document.getElementById('st').textContent=(s.mode==='prompter'?(s.playing?'Leyendo ':'En pausa ')+s.index+'/'+s.total+' · '+s.wpm+' ppm':'En el editor')+(s.voice?' · micro ON':'');
+        const mb=document.getElementById('mic'); if(mb) mb.style.background = s.voice? '#30d158' : '#2c2c2e';
+        }catch(e){}}
         setInterval(poll,1500);poll();
         </script></body></html>
         """

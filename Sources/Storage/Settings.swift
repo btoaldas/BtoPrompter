@@ -20,6 +20,7 @@ enum Settings {
         case ttsProvider, ttsCloudConsent, ttsLocalVoiceID, ttsPiperPath
         case rehearsalStats, autoInstallUpdates
         case remoteEnabled, remotePort, remoteToken, remoteComputerControl
+        case remoteInvertPointer, remoteInvertScroll
         case slideSyncEnabled, slideSyncApp
         case aiEnabled, aiProvider, aiModel, aiBaseURL, aiStyle, aiCustomPrompt
         // Claves históricas de la v1.0 (migradas a la biblioteca).

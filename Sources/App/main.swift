@@ -116,6 +116,14 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-ai"), CommandLine.argume
     exit(0)
 }
 
+// Diagnóstico del permiso de Accesibilidad (control del ordenador).
+if CommandLine.arguments.contains("--ax-status") {
+    print("ruta del binario: \(Bundle.main.bundlePath)")
+    print("autorizado en Accesibilidad: \(AXIsProcessTrusted())")
+    print("control del ordenador activado: \(Settings.bool(.remoteComputerControl, default: false))")
+    exit(AXIsProcessTrusted() ? 0 : 1)
+}
+
 // Diagnóstico de permisos del seguimiento por voz.
 if CommandLine.arguments.contains("--mic-status") {
     import_diag()

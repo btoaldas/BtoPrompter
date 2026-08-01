@@ -22,6 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Una sola instancia: si ya hay una abierta, se trae al frente y esta
+        // se retira. Evita ventanas duplicadas al abrir la app dos veces.
+        if let id = Bundle.main.bundleIdentifier {
+            let others = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+            if let existing = others.first {
+                existing.activate(options: [.activateAllWindows])
+                // Salida inmediata: terminate() dentro del arranque se aplaza y
+                // dejaría viva una segunda instancia con su propia ventana.
+                exit(0)
+            }
+        }
+
         let model = PrompterModel.shared
         let store = SpeechStore.shared
 
