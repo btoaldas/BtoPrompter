@@ -85,6 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildMenu()
         NSApp.activate(ignoringOtherApps: true)
 
+        if Settings.bool(.remoteEnabled, default: false) {
+            RemoteControl.shared.start()
+        }
+
         if CommandLine.arguments.contains("--autostart") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 model.startPrompter()

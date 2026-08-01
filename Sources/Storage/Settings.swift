@@ -11,6 +11,7 @@ enum Settings {
         case miniMode, miniFontSize
         case countdownSeconds, autoPlay, keepAwake, accentColorID, voiceFollow
         case rehearsalStats, autoInstallUpdates
+        case remoteEnabled, remotePort, remoteToken
         case aiEnabled, aiProvider, aiModel, aiBaseURL, aiStyle, aiCustomPrompt
         // Claves históricas de la v1.0 (migradas a la biblioteca).
         case legacyScript = "script"

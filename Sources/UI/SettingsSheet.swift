@@ -17,6 +17,8 @@ struct SettingsSheet: View {
                     AIConfigForm().padding(16)
                 }
                 .tabItem { Label("Ensayo IA", systemImage: "sparkles") }
+                RemoteTab()
+                    .tabItem { Label("Remoto", systemImage: "iphone.radiowaves.left.and.right") }
                 AboutTab()
                     .tabItem { Label("Acerca de", systemImage: "info.circle") }
             }
@@ -85,6 +87,63 @@ struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+struct RemoteTab: View {
+    @ObservedObject private var remote = RemoteControl.shared
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { Settings.bool(.remoteEnabled, default: false) },
+            set: { on in
+                Settings.set(on, .remoteEnabled)
+                if on { remote.start() } else { remote.stop() }
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Toggle("Activar control remoto desde el teléfono", isOn: enabledBinding)
+                .toggleStyle(.switch)
+            Text("Abre la dirección en tu iPhone (misma red Wi-Fi) y tendrás play/pausa, velocidad y saltos en la mano. Protegido con un código en la dirección; solo funciona en tu red local.")
+                .font(.system(size: 11))
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if remote.running, let url = remote.url {
+                if let qr = Self.qrImage(url) {
+                    Image(nsImage: qr)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 150, height: 150)
+                        .background(Color.white)
+                        .cornerRadius(8)
+                }
+                Text(url)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                Text("Escanea el QR con la cámara del iPhone")
+                    .font(.system(size: 10)).foregroundColor(.gray)
+            } else if let status = remote.status {
+                Text(status).font(.system(size: 11)).foregroundColor(.red)
+            }
+            Spacer()
+        }
+        .padding(16)
+    }
+
+    private static func qrImage(_ string: String) -> NSImage? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(string.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage?
+            .transformed(by: CGAffineTransform(scaleX: 8, y: 8)) else { return nil }
+        let rep = NSCIImageRep(ciImage: output)
+        let img = NSImage(size: rep.size)
+        img.addRepresentation(rep)
+        return img
     }
 }
 
