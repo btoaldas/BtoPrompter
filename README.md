@@ -21,6 +21,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - ✨ **Ensayo con IA (opcional, apagado por defecto)** — un modelo de lenguaje marca el ritmo del discurso sin cambiar ninguna palabra: pausas (…), guías de actuación (`// Aquí más enfático`), signos de entonación y velocidades por tramo (`[v+20]`, `[v-30]`, `[v=]`). Compatible con Groq, OpenAI, OpenRouter o cualquier API estilo OpenAI con tu propia key. Estilos: conferencia, clase, dictado, motivacional o prompt personalizado. El resultado se guarda como discurso nuevo; el original queda intacto.
 - 🪟 **Transparencia 0–100 %** — al 0 % desaparece el fondo y solo quedan las letras flotando sobre tu presentación o tu audiencia.
 - 🎈 **No roba el foco** — es un panel no-activante: flota incluso sobre apps en pantalla completa y puedes hacer clic sin quitarle el teclado a tu presentación.
+- 📏 **Modo minimalista** — barra delgada pegada arriba de la pantalla (debajo del notch), todo el ancho, karaoke en máximo 2 líneas con controles esenciales a los costados. Tecla `M` para entrar y salir; el alto se adapta al tamaño de letra.
 - 🔠 **Tamaño de letra ajustable** en vivo.
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
 
@@ -34,6 +35,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 | `+` `−` | Tamaño de letra |
 | `[` `]` | Transparencia del fondo |
 | `R` | Reiniciar |
+| `M` | Modo minimalista (barra de 2 líneas arriba) |
 | `Esc` | Volver al editor |
 
 **Atajos globales** (funcionan desde cualquier app mientras el prompter está activo):
