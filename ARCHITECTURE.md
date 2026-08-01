@@ -79,3 +79,33 @@ Sources/
 | Nueva vista o control          | `UI/` (usar `Theme` y `Components`)        |
 
 Antes de commitear: `./build.sh && dist/BtoPrompter.app/Contents/MacOS/BtoPrompter --selftest`
+
+## Política de funciones independientes
+
+Regla del proyecto para TODA función nueva. Sin excepciones.
+
+1. **Activable.** Cada función tiene su propio interruptor en Configuración. El
+   usuario decide, la app no impone.
+2. **Apagada por defecto** si pide un permiso del sistema, usa la red, gasta
+   dinero (APIs de pago) o graba algo. Encendida por defecto solo si es inocua.
+3. **Inerte cuando está apagada.** No abre dispositivos, no escucha, no crea
+   temporizadores, no escribe en disco y no monta servidores. Apagada significa
+   que no existe, no que está esperando.
+4. **Sin interferencias.** Ninguna función puede alterar el comportamiento de
+   otra. Casos que ya se cuidan: un solo micrófono compartido y jamás dos
+   motores de voz a la vez; el avance por tiempo y el avance por voz se
+   excluyen; el modo minimalista no rompe el encuadre normal.
+5. **La invisibilidad al compartir pantalla es intocable.** Ninguna función
+   puede hacer que el teleprompter aparezca en una llamada o una captura sin
+   que el usuario lo haya pedido de forma explícita.
+6. **Degradación honesta.** Si falta un permiso, una clave o la red, la función
+   lo dice con claridad y el resto de la app sigue funcionando igual. Nunca se
+   queda el prompter congelado por un fallo de una función accesoria.
+
+Cómo se comprueba antes de dar una función por terminada:
+
+- Con el interruptor apagado, el comportamiento previo es idéntico: mismo
+  arranque, mismos permisos pedidos, mismos archivos escritos.
+- Con la función encendida y su permiso denegado, la app avisa y sigue usable.
+- Encender y apagar en caliente, varias veces, sin dejar recursos abiertos.
+- `--selftest` en verde y prueba real de la función con evidencia reproducible.
