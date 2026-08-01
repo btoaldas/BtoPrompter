@@ -38,7 +38,10 @@ struct AIRehearsal {
     static func systemPrompt(styleID: String, customPrompt: String) -> String {
         let extra = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var styleHint: String
-        if styleID == "personalizado" {
+        if let custom = CustomStylesStore.shared.style(withStyleID: styleID) {
+            styleHint = custom.prompt
+            if !extra.isEmpty { styleHint += "\n\n" + extra }
+        } else if styleID == "personalizado" {
             styleHint = extra
         } else {
             styleHint = styles.first(where: { $0.id == styleID })?.hint ?? ""
@@ -66,9 +69,42 @@ struct AIRehearsal {
         """
     }
 
+    // Pide a la IA que resuma cómo habla el orador a partir de sus datos
+    // locales de diagnóstico, y devuelva un prompt de estilo reutilizable.
+    static func buildSpeakerStyle(evidence: String, baseURL: String, apiKey: String,
+                                  model: String,
+                                  completion: @escaping (Result<String, Error>) -> Void) {
+        let system = """
+        Eres un entrenador de oratoria. Recibirás datos MEDIDOS de cómo lee y habla una persona \
+        durante sus ensayos con un teleprompter: ritmo real, pausas, tramos rápidos y lentos, \
+        correcciones y fragmentos de lo que dijo.
+
+        Escribe una INSTRUCCIÓN DE ESTILO en español, en segunda persona, dirigida a otra IA que \
+        marcará el ritmo de los guiones de esta persona (pausas con puntos suspensivos, guías de \
+        actuación con //, marcas de velocidad [v+N]/[v-N]).
+
+        Describe su ritmo habitual, dónde tiende a acelerarse o frenarse, qué tan largas son sus \
+        frases y qué marcas le convienen para sonar natural. No inventes datos que no estén en la \
+        evidencia. No incluyas cifras que no aparezcan. Máximo 12 líneas.
+        Responde solo con la instrucción, sin encabezados ni comentarios.
+        """
+        request(system: system, user: evidence, baseURL: baseURL, apiKey: apiKey,
+                model: model, temperature: 0.4, completion: completion)
+    }
+
     static func run(text: String, baseURL: String, apiKey: String, model: String,
                     styleID: String, customPrompt: String,
                     completion: @escaping (Result<String, Error>) -> Void) {
+        request(system: systemPrompt(styleID: styleID, customPrompt: customPrompt),
+                user: text, baseURL: baseURL, apiKey: apiKey, model: model,
+                temperature: 0.3, completion: completion)
+    }
+
+    // Llamada única a una API estilo OpenAI, compartida por el marcado de
+    // ritmo y por la construcción del perfil del orador.
+    private static func request(system: String, user: String, baseURL: String,
+                                apiKey: String, model: String, temperature: Double,
+                                completion: @escaping (Result<String, Error>) -> Void) {
         guard let url = URL(string: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                                         .appending("/chat/completions")) else {
             completion(.failure(NSError(domain: "BtoPrompter", code: 1,
@@ -82,10 +118,10 @@ struct AIRehearsal {
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let body: [String: Any] = [
             "model": model,
-            "temperature": 0.3,
+            "temperature": temperature,
             "messages": [
-                ["role": "system", "content": systemPrompt(styleID: styleID, customPrompt: customPrompt)],
-                ["role": "user", "content": text],
+                ["role": "system", "content": system],
+                ["role": "user", "content": user],
             ],
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)

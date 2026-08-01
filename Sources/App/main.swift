@@ -19,6 +19,37 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.argu
     exit(0)
 }
 
+// Genera un estilo de ensayo a partir del diagnóstico real, con la IA.
+if CommandLine.arguments.contains("--test-style") {
+    let combined = SessionAnalyzer.combinedReport(limit: 5)
+    guard !combined.reports.isEmpty else {
+        print("ERROR: no hay sesiones analizables")
+        exit(1)
+    }
+    print("--- evidencia local ---")
+    print(combined.text)
+    var evidence = combined.text
+    let profile = SpeakingProfileStore.shared
+    if !profile.stylePrompt.isEmpty { evidence += "\n\n" + profile.stylePrompt }
+    let provider = Settings.string(.aiProvider, default: "groq")
+    let base = provider == "custom"
+        ? Settings.string(.aiBaseURL, default: "")
+        : (AIRehearsal.providers.first(where: { $0.id == provider })?.baseURL ?? "")
+    let key = SecretsStore.get("aiKey_\(provider)")
+    let model = Settings.string(.aiModel, default: "llama-3.3-70b-versatile")
+    let sem = DispatchSemaphore(value: 0)
+    AIRehearsal.buildSpeakerStyle(evidence: evidence, baseURL: base,
+                                  apiKey: key, model: model) { result in
+        switch result {
+        case .success(let text): print("\n--- estilo redactado por la IA ---\n" + text)
+        case .failure(let error): print("ERROR: \(error.localizedDescription)")
+        }
+        sem.signal()
+    }
+    sem.wait()
+    exit(0)
+}
+
 // Prueba de un motor TTS: genera audio y lo guarda, sin abrir la interfaz.
 if let i = CommandLine.arguments.firstIndex(of: "--test-tts"), CommandLine.arguments.count > i + 2 {
     let providerID = CommandLine.arguments[i + 1]

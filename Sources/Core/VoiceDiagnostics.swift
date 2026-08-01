@@ -11,6 +11,7 @@ final class VoiceDiagnostics {
     private let fm = FileManager.default
     private var sessionURL: URL?
     private var eventsHandle: FileHandle?
+    private var wordsHandle: FileHandle?
     private var audioFile: AVAudioFile?
     private var sessionStartedAt: Date?
     private var sessionID: String?
@@ -99,6 +100,11 @@ final class VoiceDiagnostics {
                     try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: scriptURL.path)
                 }
                 if detailed {
+                    // Alineación palabra↔audio en su propio archivo.
+                    let words = dir.appendingPathComponent("words.jsonl")
+                    fm.createFile(atPath: words.path, contents: nil,
+                                  attributes: [.posixPermissions: 0o600])
+                    wordsHandle = try? FileHandle(forWritingTo: words)
                     let events = dir.appendingPathComponent("events.jsonl")
                     fm.createFile(atPath: events.path, contents: nil,
                                   attributes: [.posixPermissions: 0o600])
@@ -133,8 +139,43 @@ final class VoiceDiagnostics {
         guard Settings.bool(.diagnosticsRecordAudio, default: false),
               let copy = Self.copyBuffer(buffer) else { return }
         queue.async {
-            do { try self.audioFile?.write(from: copy) }
-            catch { self.operational("ERROR", "Error guardando audio local: \(error.localizedDescription)") }
+            do {
+                try self.audioFile?.write(from: copy)
+                // Reloj de audio: segundos escritos al archivo. Es la
+                // referencia para alinear cada palabra del guion con el punto
+                // exacto de la grabación en que se dijo.
+                if let file = self.audioFile, file.fileFormat.sampleRate > 0 {
+                    self.audioSeconds = Double(file.length) / file.fileFormat.sampleRate
+                }
+            } catch {
+                self.operational("ERROR", "Error guardando audio local: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Posición actual de la grabación, en segundos.
+    private(set) var audioSeconds: Double = 0
+
+    /// Registro palabra a palabra: qué palabra marcaba el prompter, en qué
+    /// segundo del audio y de la sesión, y si avanzó por voz o por tiempo.
+    func word(index: Int, word: String, chunkID: Int, source: String, wpm: Int) {
+        guard Settings.bool(.diagnosticsEnabled, default: false) else { return }
+        let elapsed = sessionStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        queue.async {
+            guard let handle = self.wordsHandle else { return }
+            let payload: [String: Any] = [
+                "i": index,
+                "w": self.redact(word),
+                "chunk": chunkID,
+                "src": source,
+                "t_audio": (self.audioSeconds * 1000).rounded() / 1000,
+                "t_session": (elapsed * 1000).rounded() / 1000,
+                "wpm": wpm,
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  var line = String(data: data, encoding: .utf8) else { return }
+            line += "\n"
+            try? handle.write(contentsOf: Data(line.utf8))
         }
     }
 
@@ -211,6 +252,9 @@ final class VoiceDiagnostics {
         try? eventsHandle?.synchronize()
         try? eventsHandle?.close()
         eventsHandle = nil
+        try? wordsHandle?.close()
+        wordsHandle = nil
+        audioSeconds = 0
         audioFile = nil
         sessionURL = nil
         sessionID = nil

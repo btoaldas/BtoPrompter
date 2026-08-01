@@ -19,8 +19,18 @@ final class PrompterModel: ObservableObject {
     @Published var chunks: [Chunk] = []
     @Published var currentIndex: Int = 0 {
         didSet {
+            guard mode == .prompting, currentIndex != oldValue else { return }
+            // Alineación palabra↔audio para el análisis posterior.
+            if let chunk = chunkAt(currentIndex) {
+                let offset = currentIndex - chunk.range.lowerBound
+                let word = offset >= 0 && offset < chunk.words.count ? chunk.words[offset] : ""
+                VoiceDiagnostics.shared.word(index: currentIndex, word: word,
+                                             chunkID: chunk.id,
+                                             source: voiceActive ? "voz" : "tiempo",
+                                             wpm: wpm)
+            }
             // Cruce de marcas de diapositiva: solo hacia adelante.
-            guard mode == .prompting, currentIndex > oldValue else { return }
+            guard currentIndex > oldValue else { return }
             for chunk in chunks where chunk.isSlideMark {
                 let pos = chunk.range.lowerBound   // posición del siguiente texto leíble
                 if oldValue < pos && pos <= currentIndex {

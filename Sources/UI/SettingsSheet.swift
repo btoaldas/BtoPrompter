@@ -327,6 +327,8 @@ struct DiagnosticsSettingsTab: View {
                     .font(.system(size: 10)).foregroundColor(.secondary)
             }
 
+            SessionAnalysisView()
+
             Section("Mi forma de hablar") {
                 Toggle("Aprender localmente mi ritmo y estilo de expresión",
                        isOn: $profileEnabled)

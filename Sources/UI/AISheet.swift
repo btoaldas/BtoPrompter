@@ -7,6 +7,8 @@ import SwiftUI
 struct AIConfigForm: View {
     @EnvironmentObject var model: PrompterModel
     @State private var keyDraft: String = ""
+    @ObservedObject private var customStyles = CustomStylesStore.shared
+    @State private var showStyleManager = false
 
     private var keyBinding: Binding<String> {
         Binding(
@@ -47,10 +49,22 @@ struct AIConfigForm: View {
             SecureField("API key del proveedor (se guarda solo en tu Mac)", text: keyBinding)
                 .textFieldStyle(.roundedBorder)
 
-            Picker("Estilo", selection: $model.aiStyle) {
-                ForEach(AIRehearsal.styles, id: \.id) { s in
-                    Text(s.name).tag(s.id)
+            HStack {
+                Picker("Estilo", selection: $model.aiStyle) {
+                    ForEach(AIRehearsal.styles, id: \.id) { s in
+                        Text(s.name).tag(s.id)
+                    }
+                    if !customStyles.styles.isEmpty {
+                        Divider()
+                        ForEach(customStyles.styles) { s in
+                            Text(s.name).tag(s.styleID)
+                        }
+                    }
                 }
+                Button {
+                    showStyleManager = true
+                } label: { Image(systemName: "slider.horizontal.3") }
+                    .help("Crear, editar o eliminar mis estilos")
             }
             if model.aiStyle == "personalizado" {
                 TextEditor(text: $model.aiCustomPrompt)
@@ -76,6 +90,9 @@ struct AIConfigForm: View {
             }
         }
         .onAppear { keyDraft = model.aiKey(for: model.aiProvider) }
+        .sheet(isPresented: $showStyleManager) {
+            StyleManagerView().environmentObject(model)
+        }
     }
 
     var hasKey: Bool { !keyDraft.isEmpty }
