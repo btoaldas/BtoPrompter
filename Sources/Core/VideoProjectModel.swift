@@ -99,6 +99,8 @@ struct SegmentLayout: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .overlay
+        transitionIn = try c.decodeIfPresent(TransitionKind.self, forKey: .transitionIn) ?? .cut
+        transitionMs = try c.decodeIfPresent(Double.self, forKey: .transitionMs) ?? 400
         layerOrder = try c.decodeIfPresent([UUID].self, forKey: .layerOrder)
         camRect = try c.decodeIfPresent(NRect.self, forKey: .camRect)
             ?? NRect(x: 0.72, y: 0.62, width: 0.25, height: 0.34)
@@ -109,7 +111,15 @@ struct SegmentLayout: Codable, Equatable {
         screen = try c.decodeIfPresent(SourceSettings.self, forKey: .screen) ?? SourceSettings()
     }
 
+    enum TransitionKind: String, Codable, CaseIterable {
+        case cut    // corte seco (por defecto: la metodología no se toca)
+        case fade   // fundido desde el tramo anterior
+    }
+
     var mode: Mode = .overlay
+    // Transición de ENTRADA del tramo: cómo se llega a él desde el anterior.
+    var transitionIn: TransitionKind = .cut
+    var transitionMs: Double = 400
     // Orden de dibujo de las capas EN ESTE TRAMO (ids, la última más arriba).
     // nil = usar el orden global del proyecto. Así en un corte la capa A va
     // encima y en el siguiente va debajo, sin duplicar nada.
@@ -125,6 +135,7 @@ struct SegmentLayout: Codable, Equatable {
 
     func sanitized() -> SegmentLayout {
         var l = self
+        l.transitionMs = min(2000, max(100, l.transitionMs))
         l.splitRatio = min(0.8, max(0.2, l.splitRatio))
         l.camRect = l.camRect.clamped(minSide: 0.06)
         l.borderWidth = min(0.05, max(0, l.borderWidth))
@@ -260,8 +271,13 @@ struct VideoProject: Codable, Equatable {
     // tiene, el global si no. Capas ausentes de la lista van al final en su
     // orden global (capas añadidas después de fijar el orden del tramo).
     func orderedLayers(at seconds: Double) -> [ExtraLayer] {
-        let layout = layout(at: seconds)
-        guard let order = layout.layerOrder else { return extraLayers }
+        orderedLayers(forSegment: segmentIndex(at: seconds))
+    }
+
+    func orderedLayers(forSegment seg: Int) -> [ExtraLayer] {
+        guard layouts.indices.contains(seg), let order = layouts[seg].layerOrder else {
+            return extraLayers
+        }
         var byID = [UUID: ExtraLayer]()
         for l in extraLayers { byID[l.id] = l }
         var result: [ExtraLayer] = []

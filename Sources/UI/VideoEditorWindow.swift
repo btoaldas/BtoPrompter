@@ -478,6 +478,7 @@ struct TimelineStrip: View {
     @ObservedObject var state: VideoProjectState
     @Binding var playhead: Double
     let onSeek: (Double) -> Void
+    @State private var draggingCut: Int? = nil
 
     private func modeLabel(_ m: SegmentLayout.Mode) -> String {
         switch m {
@@ -521,12 +522,30 @@ struct TimelineStrip: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.gray.opacity(0.2))
                         .frame(height: 18)
-                    // Marcas de corte.
-                    ForEach(state.project.cuts, id: \.self) { cut in
+                    // Marcas de corte: se agarran y se ARRASTRAN. moveCut ya
+                    // impide invadir al corte vecino; el imán pega a segundos
+                    // enteros cuando pasa a menos de un decimo.
+                    ForEach(Array(state.project.cuts.enumerated()), id: \.offset) { ci, cut in
                         Rectangle()
-                            .fill(Color.orange)
+                            .fill(draggingCut == ci ? Color.yellow : Color.orange)
                             .frame(width: 2, height: 18)
-                            .offset(x: w * cut / duration)
+                            .frame(width: 14)               // zona de agarre generosa
+                            .contentShape(Rectangle())
+                            .offset(x: w * cut / duration - 7)
+                            .gesture(
+                                DragGesture(minimumDistance: 1)
+                                    .onChanged { g in
+                                        draggingCut = ci
+                                        var s = Double((g.location.x) / w) * duration
+                                        let whole = (s).rounded()
+                                        if abs(s - whole) < 0.1 { s = whole }   // imán
+                                        var p = state.project
+                                        p.moveCut(ci, to: s)
+                                        state.project = p
+                                    }
+                                    .onEnded { _ in draggingCut = nil }
+                            )
+                            .help(String(format: "Corte en %.1f s — arrastra para moverlo", cut))
                     }
                     // Cursor.
                     Rectangle()
@@ -589,6 +608,7 @@ struct SegmentInspector: View {
                     sourceSection(title: "Pantalla", keyPath: \.screen)
                 }
                 shapeSection
+                transitionSection
                 Divider()
                 LayersSection(state: state, playhead: $playhead,
                               onStructureChange: onStructureChange)
@@ -762,6 +782,31 @@ struct SegmentInspector: View {
                 get: { state.selectedLayout.borderWidth },
                 set: { var l = state.selectedLayout; l.borderWidth = $0; state.selectedLayout = l }),
                 in: 0...0.05)
+        }
+    }
+
+    // Cómo se ENTRA a este tramo desde el anterior. En el primero no aplica.
+    private var transitionSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Entrada", selection: Binding(
+                get: { state.selectedLayout.transitionIn },
+                set: { var l = state.selectedLayout; l.transitionIn = $0; state.selectedLayout = l }
+            )) {
+                Text("Corte seco").tag(SegmentLayout.TransitionKind.cut)
+                Text("Fundido").tag(SegmentLayout.TransitionKind.fade)
+            }
+            .pickerStyle(.segmented)
+            .disabled(state.selectedSegment == 0)
+            if state.selectedLayout.transitionIn == .fade {
+                slider("Duración (ms)", value: Binding(
+                    get: { state.selectedLayout.transitionMs },
+                    set: { var l = state.selectedLayout; l.transitionMs = $0; state.selectedLayout = l }),
+                    in: 100...2000)
+            }
+            if state.selectedSegment == 0 {
+                Text("El primer tramo no tiene entrada.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 

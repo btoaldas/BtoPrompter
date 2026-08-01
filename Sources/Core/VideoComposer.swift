@@ -101,7 +101,9 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                            ? CompositionParameters.shared.exportProject : nil)
                 ?? CompositionParameters.shared.project
             let seconds = request.compositionTime.seconds
-            let layout = project.layout(at: seconds)
+            let segIdx = project.segmentIndex(at: seconds)
+            let layout = project.layouts.indices.contains(segIdx)
+                ? project.layouts[segIdx] : SegmentLayout()
 
             let screen = instruction.screenTrack == kCMPersistentTrackID_Invalid ? nil
                 : request.sourceFrame(byTrackID: instruction.screenTrack).map { CIImage(cvPixelBuffer: $0) }
@@ -124,11 +126,36 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                 }
             }
 
-            let image = FrameComposer.compose(screen: screen, camera: camera,
+            var image = FrameComposer.compose(screen: screen, camera: camera,
                                               layout: layout, background: project.background,
                                               canvas: size, seconds: seconds,
                                               extraLayers: ordered,
                                               layerImages: layerImages)
+
+            // Fundido de entrada: durante la ventana de la transición se
+            // compone TAMBIÉN el tramo saliente y se mezclan. El corte sigue
+            // siendo corte; solo la imagen funde.
+            if segIdx > 0, layout.transitionIn == .fade {
+                let start = project.segmentRange(segIdx).start
+                let dur = layout.transitionMs / 1000
+                if dur > 0, seconds < start + dur {
+                    let progress = max(0, min(1, (seconds - start) / dur))
+                    let prevLayout = project.layouts[segIdx - 1]
+                    let prevOrdered = project.orderedLayers(forSegment: segIdx - 1)
+                    let prevImage = FrameComposer.compose(
+                        screen: screen, camera: camera, layout: prevLayout,
+                        background: project.background, canvas: size,
+                        seconds: seconds, extraLayers: prevOrdered,
+                        layerImages: layerImages)
+                    if let blend = CIFilter(name: "CIDissolveTransition", parameters: [
+                        kCIInputImageKey: prevImage,
+                        kCIInputTargetImageKey: image,
+                        kCIInputTimeKey: progress,
+                    ])?.outputImage {
+                        image = blend.cropped(to: CGRect(origin: .zero, size: size))
+                    }
+                }
+            }
             self.context.render(image, to: out)
             request.finish(withComposedVideoFrame: out)
         }
