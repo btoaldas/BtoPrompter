@@ -37,7 +37,9 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🔊 **Lectura en voz alta multi-proveedor** — voces de macOS, **voces locales propias** (modelos Piper `.onnx` que instalas tú) o ElevenLabs, OpenAI, Gemini y Deepgram Aura, eligiendo modelo y voz. Lo local no envía nada a internet.
 - 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza la presentación: Keynote y PowerPoint por AppleScript, o **cualquier app** enviando la flecha derecha (Vista Previa, PDF, navegador).
 - ⏱️ **Cronómetro de ensayo** — al terminar te dice tiempo real, ritmo efectivo y, si pones una meta en minutos, la velocidad exacta que necesitas; calibración con un clic.
-- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con QR y dos pestañas. **Teleprompter**: iniciar, traer al frente, play/pausa, velocidad, saltos, micrófono con estado en vivo, modo minimalista, transparencia, minimizar y encuadrar. **Ordenador**: flechas, avance y retroceso de página, clics, trackpad virtual y teclado — pasa diapositivas en Keynote, PowerPoint, Vista Previa, un PDF o el navegador, porque envía teclas reales del sistema. Protegido con token, solo en tu red, y el control del ordenador exige un permiso aparte.
+- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con QR y tres pestañas. **Teleprompter**: iniciar, traer al frente, play/pausa, velocidad, saltos, micrófono con estado en vivo, modo minimalista, transparencia, minimizar y encuadrar. **Ordenador**: flechas, avance y retroceso de página, clics, trackpad virtual y teclado — pasa diapositivas en Keynote, PowerPoint, Vista Previa, un PDF o el navegador, porque envía teclas reales del sistema. **Guion**: el discurso completo en el teléfono con el mismo karaoke del Mac (ver siguiente punto). Protegido con un código aleatorio de 128 bits comparado en tiempo constante, solo en tu red; el control del ordenador exige un permiso aparte y renovar el código expulsa al instante cualquier dispositivo conectado.
+- 📲 **Espejo del guion en el teléfono** — pestaña «Guion» del remoto: el texto completo con la palabra actual resaltada y centrada, sincronizada palabra a palabra con el Mac por un canal en vivo (el móvil no pregunta: la posición le llega sola, incluida la cuenta regresiva 3-2-1 y el estado de grabación). Tamaño de letra ajustable, **modo espejo** para ponerlo frente a una cámara réflex, transporte y botón de grabar sin cambiar de pestaña. Si editas el guion en el Mac, el teléfono lo recarga solo.
+- 🎥 **Grabación de presentaciones (opcional, apagada por defecto)** — graba la **cámara** (con tu micrófono) y la **pantalla** como **dos archivos separados que arrancan sincronizados** (desfase medido: menos de 50 ms), listos para montar en cualquier editor. El teleprompter **jamás aparece** en la grabación de pantalla: la captura excluye la ventana igual que el compartir pantalla. Cuenta regresiva configurable, elección de cámara, **capítulos automáticos** al cruzar cada guía (queda un `capitulos.txt` con los tiempos) y un `sync.txt` con la hora exacta del primer fotograma de cada archivo. Los vídeos quedan en `Películas/BtoPrompter` (o la carpeta que elijas), accesibles sin abrir la app. Botón en la barra del prompter y en el teléfono. La pantalla requiere macOS 15+; la cámara funciona en cualquier versión.
 - 📄 **Exportar a PDF** — el guion marcado (guías, velocidades, pausas) listo para imprimir como respaldo.
 - 🔄 **Auto-actualización** — el aviso de versión nueva descarga, valida e instala solo (desactivable).
 - 🗄️ **Organización**: arrastra discursos a carpetas (o usa el menú contextual), colapsa carpetas, marca borradores, archiva.
@@ -108,14 +110,28 @@ La key se guarda en un archivo local con permisos privados (`0600`); nunca se in
 - Las grabaciones de diagnóstico son opcionales, locales y visibles mediante Configuración → Diagnóstico; pueden borrarse desde allí.
 - La transcripción de archivos de audio sigue disponible al importar `.m4a`, `.mp3`, `.wav`, `.aac`, `.aiff`, `.caf` o `.flac`.
 
+### Grabación de presentaciones
+
+En Configuración → Grabación: activa la función, elige qué grabar (cámara, pantalla o ambas) y desde dónde (botón en la barra del prompter, o el botón «Grabar» del teléfono). Cada grabación crea una carpeta con fecha y hora en `Películas/BtoPrompter`:
+
+```
+2026-08-01-160809/
+├── camara-2026-08-01-160809.mov     ← tú, con el audio del micrófono
+├── pantalla-2026-08-01-160809.mov   ← tu pantalla, SIN el teleprompter
+├── sync.txt                         ← hora exacta del primer fotograma de cada archivo
+└── capitulos.txt                    ← una marca de tiempo por cada guía cruzada
+```
+
+Los dos vídeos arrancan a la vez (el motor prepara el hardware primero y solo escribe cuando la cámara ya entrega imagen), así que en el editor basta ponerlos en paralelo. La primera vez, macOS pedirá permiso de cámara y de grabación de pantalla.
+
 ### Notas sobre la invisibilidad
 
-- Funciona con todo software que capture pantalla mediante las APIs de macOS (Zoom, Teams, Meet, OBS, QuickTime…).
+- Funciona con todo software que capture pantalla mediante las APIs de macOS (Zoom, Teams, Meet, OBS, QuickTime…), **incluida la propia grabación de pantalla de la app**.
 - **No** sobrevive a capturadoras de hardware (HDMI) ni AirPlay.
 - Si compartes pantalla completa con la app enfocada, la barra de menú de macOS muestra el nombre de la app; compartir solo la ventana de tu presentación lo evita.
 - Haz siempre una grabación de prueba de 30 segundos antes del evento real.
 
-Flags de desarrollo: `--capturable` (arranca visible en capturas, útil para probar) y `--autostart` (entra directo al prompter reproduciendo).
+Flags de desarrollo: `--capturable` (arranca visible en capturas, útil para probar), `--autostart` (entra directo al prompter reproduciendo) y `--test-sharing` (comprobación automática de la invisibilidad: crea una ventana excluida y una de control, captura la pantalla y verifica que la primera no aparece y la segunda sí).
 
 ## Privacidad
 

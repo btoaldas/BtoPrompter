@@ -227,6 +227,7 @@ struct PrompterView: View {
                 speedGroup
                 fontGroup
                 opacityGroup(width: 80)
+                RecordButton()
                 Spacer(minLength: 8)
                 hotkeyHint
                 SpyToggle(compact: false)
@@ -237,6 +238,7 @@ struct PrompterView: View {
                 speedGroup
                 fontGroup
                 opacityGroup(width: 60)
+                RecordButton()
                 Spacer(minLength: 6)
                 SpyToggle(compact: false)
             }

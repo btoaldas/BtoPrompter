@@ -169,7 +169,11 @@ final class RemoteControl: ObservableObject {
             default: break
             }
         }
-        sendToMirror(conn, event: RemoteMirror.stateJSON())
+        // El estado se arma en el hilo principal (lee el motor y la grabación);
+        // llegar aquí desde la cola de red con assumeIsolated sería un crash.
+        DispatchQueue.main.async { [weak self] in
+            self?.sendToMirror(conn, event: RemoteMirror.stateJSON())
+        }
     }
 
     private func dropMirrorClient(_ conn: NWConnection) {
@@ -293,6 +297,14 @@ final class RemoteControl: ObservableObject {
             }
             if m.mode == .editing { m.startPrompter() }
         case "mic": m.voiceFollow.toggle()
+        case "record":
+            // La orden viene del teléfono; la grabación arranca o para
+            // directamente, con su cuenta regresiva como aviso. perform() ya
+            // corre en el hilo principal: se lo hacemos saber al compilador.
+            MainActor.assumeIsolated {
+                guard RecordingEngine.enabled else { return }
+                RecordingEngine.shared.toggle()
+            }
         case "mini": m.toggleMiniMode()
         case "reframe":
             (NSApp.delegate as? AppDelegate)?.resetWindowFrame()
@@ -411,6 +423,7 @@ final class RemoteControl: ObservableObject {
             <button class="mini" onclick="mirror()">Espejo</button>
             <button class="mini" onclick="cmd('back10')">-10</button>
             <button class="mini" onclick="cmd('fwd10')">+10</button>
+            <button class="mini" id="recbtn" onclick="cmd('record')">&#9210; Grabar</button>
           </div>
           <div id="wrap"><div id="script"></div></div>
           <div id="warn">Para que la pantalla no se apague: Ajustes &rarr; Pantalla y brillo &rarr; Bloqueo autom&aacute;tico &rarr; Nunca</div>
@@ -508,6 +521,7 @@ final class RemoteControl: ObservableObject {
             (s.mode==='prompter'?(s.playing?'Leyendo ':'En pausa ')+(s.i+1)+'/'+s.total+' \u{00B7} '+s.wpm+' ppm':'En el editor')
             + (s.voice?' \u{00B7} micro ON':'');
           const mb=document.getElementById('mic'); if(mb) mb.style.background = s.voice? '#30d158' : '#2c2c2e';
+          const rb=document.getElementById('recbtn'); if(rb) rb.style.background = s.rec? '#ff453a' : '#2c2c2e';
         }
         (function(){
           const pad=document.getElementById('pad');

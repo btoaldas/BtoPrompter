@@ -2,33 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDisplayName</key>
+	<string>BtoPrompter</string>
 	<key>CFBundleExecutable</key>
 	<string>BtoPrompter</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.bto.btoprompter</string>
 	<key>CFBundleName</key>
 	<string>BtoPrompter</string>
-	<key>CFBundleDisplayName</key>
-	<string>BtoPrompter</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.0.4</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>BtoPrompter puede avanzar tus diapositivas de Keynote o PowerPoint cuando el guion cruza una marca de diapositiva.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>BtoPrompter usa la cámara solo si activas la grabación de tus presentaciones.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>BtoPrompter escucha tu voz para avanzar el guion. El audio solo sale del Mac si eliges y autorizas expresamente un proveedor externo.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>BtoPrompter usa el reconocimiento de voz para transcribir audio y seguir tu lectura. El motor local de Apple procesa el audio en este Mac.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>BtoPrompter escucha tu voz para avanzar el guion. El audio solo sale del Mac si eliges y autorizas expresamente un proveedor externo.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>BtoPrompter puede avanzar tus diapositivas de Keynote o PowerPoint cuando el guion cruza una marca de diapositiva.</string>
 </dict>
 </plist>

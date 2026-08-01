@@ -146,3 +146,35 @@ struct SpyToggle: View {
               : "VISIBLE al compartir pantalla. Púlsalo para ocultarla en Zoom, Teams y capturas.")
     }
 }
+
+// Botón de grabar de la barra del prompter. Solo existe si la grabación está
+// activada en Ajustes; muestra la fase (conteo, grabando) y sirve de
+// confirmación cuando la orden llega desde el teléfono.
+struct RecordButton: View {
+    @ObservedObject private var engine = RecordingEngine.shared
+
+    var body: some View {
+        if RecordingEngine.enabled {
+            Button(action: { engine.toggle() }) {
+                switch engine.phase {
+                case .idle:
+                    Image(systemName: "record.circle")
+                        .foregroundColor(.red)
+                case .countdown(let n):
+                    Text("\(n)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(.orange)
+                case .recording:
+                    Image(systemName: "stop.circle.fill")
+                        .foregroundColor(.red)
+                case .stopping:
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .buttonStyle(.plain)
+            .help(engine.phase == .idle
+                  ? "Grabar la presentación (cámara y/o pantalla, según Ajustes)"
+                  : "Detener la grabación")
+        }
+    }
+}

@@ -23,6 +23,8 @@ enum Settings {
         case remoteInvertPointer, remoteInvertScroll
         case slideSyncEnabled, slideSyncApp
         case aiEnabled, aiProvider, aiModel, aiBaseURL, aiStyle, aiCustomPrompt
+        case recordingEnabled, recordCamera, recordScreen, recordFolder
+        case recordCameraDevice, recordCountdown, recordChapters, recordMicInRecording
         // Claves históricas de la v1.0 (migradas a la biblioteca).
         case legacyScript = "script"
         case legacyLastScript = "lastScript"

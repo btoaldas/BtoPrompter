@@ -24,6 +24,8 @@ struct SettingsSheet: View {
                     AIConfigForm().padding(16)
                 }
                 .tabItem { Label("Ensayo IA", systemImage: "sparkles") }
+                RecordingSettingsTab()
+                    .tabItem { Label("Grabación", systemImage: "record.circle") }
                 RemoteTab()
                     .tabItem { Label("Remoto", systemImage: "iphone.radiowaves.left.and.right") }
                 AboutTab()

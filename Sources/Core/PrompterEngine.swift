@@ -41,6 +41,16 @@ final class PrompterModel: ObservableObject {
                     SlideSync.shared.advanceSlide()
                 }
             }
+            // Capítulos de la grabación: cada guía cruzada deja su marca.
+            for chunk in chunks where chunk.isGuide {
+                let pos = chunk.range.lowerBound
+                if oldValue < pos && pos <= currentIndex {
+                    let label = chunk.words.joined(separator: " ")
+                    DispatchQueue.main.async {
+                        RecordingEngine.shared.markChapter(label)
+                    }
+                }
+            }
         }
     }
     @Published var isPlaying: Bool = false {

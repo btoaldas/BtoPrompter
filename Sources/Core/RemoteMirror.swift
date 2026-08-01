@@ -61,6 +61,7 @@ enum RemoteMirror {
         "total":\(m.totalWords),"voice":\(m.voiceActive),\
         "mode":"\(m.mode == .prompting ? "prompter" : "editor")",\
         "countdown":\(m.countdown.map(String.init) ?? "null"),\
+        "rec":\(MainActor.assumeIsolated { RecordingEngine.shared.phase != .idle }),\
         "rev":\(revision)}
         """
     }
