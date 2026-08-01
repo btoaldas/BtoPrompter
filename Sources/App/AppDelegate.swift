@@ -16,7 +16,7 @@ final class PrompterPanel: NSPanel {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var window: NSWindow!
     private var cancellables = Set<AnyCancellable>()
     private var keyMonitor: Any?
@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(model)
                 .environmentObject(store)
         )
+        window.delegate = self
         window.center()
         window.makeKeyAndOrderFront(nil)
 
@@ -120,7 +121,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SpeechStore.shared.saveNow()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    // La ventana nunca muere de verdad: cerrar = ocultar. La app solo termina
+    // con Cmd+Q. Un clic en el ícono del Dock siempre la trae de vuelta.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
 
     private func buildMenu() {
         let mainMenu = NSMenu()
