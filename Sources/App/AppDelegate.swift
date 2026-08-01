@@ -23,9 +23,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Abrir directo el editor de composición (pruebas y acceso rápido).
-        if CommandLine.arguments.contains("--editor") {
+        // Con ruta: esa carpeta; sin ruta: el selector de proyectos.
+        if let i = CommandLine.arguments.firstIndex(of: "--editor") {
+            let folder: URL? = CommandLine.arguments.count > i + 1
+                && !CommandLine.arguments[i + 1].hasPrefix("--")
+                ? URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+                : nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                VideoEditorWindowController.shared.open()
+                VideoEditorWindowController.shared.open(folder: folder)
             }
         }
         // Una sola instancia: si ya hay una abierta, se trae al frente y esta

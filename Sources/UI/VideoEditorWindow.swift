@@ -21,10 +21,40 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
 
     static var enabled: Bool { Settings.bool(.videoEditorEnabled, default: false) }
 
+    private var pickerWindow: NSWindow?
+
+    // Sin carpeta explícita se abre el SELECTOR: cualquier grabación o
+    // proyecto, no solo el último.
     func open(folder: URL? = nil) {
         guard Self.enabled else { return }
-        let target = folder ?? Self.latestRecordingFolder()
-        guard let target, let sources = CompositionBuilder.sources(inFolder: target) else {
+        guard let target = folder else {
+            openPicker()
+            return
+        }
+        openFolder(target)
+    }
+
+    private func openPicker() {
+        if pickerWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 380),
+                             styleMask: [.titled, .closable],
+                             backing: .buffered, defer: false)
+            w.title = "Elegir grabación o proyecto"
+            w.center()
+            w.isReleasedWhenClosed = false
+            pickerWindow = w
+        }
+        pickerWindow?.contentView = NSHostingView(rootView: ProjectPickerView { [weak self] url in
+            self?.pickerWindow?.orderOut(nil)
+            self?.openFolder(url)
+        })
+        pickerWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func openFolder(_ target: URL) {
+        guard Self.enabled else { return }
+        guard let sources = CompositionBuilder.sources(inFolder: target) else {
             let alert = NSAlert()
             alert.messageText = "No hay ninguna grabación que componer"
             alert.informativeText = "El editor necesita una carpeta de grabación con al menos "
@@ -32,6 +62,10 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             alert.runModal()
             return
         }
+        openEditorWindow(target: target, sources: sources)
+    }
+
+    private func openEditorWindow(target: URL, sources: CompositionBuilder.Sources) {
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -102,6 +136,8 @@ final class VideoProjectState: ObservableObject {
         VideoProjectStore.save(project, folder: folder)
     }
     @Published var selectedSegment = 0
+    // Capa seleccionada: compartida entre el panel y el lienzo vivo.
+    @Published var selectedLayerID: UUID? = nil
     let folder: URL
     var onChange: (() -> Void)?
 
@@ -170,6 +206,20 @@ struct VideoEditorView: View {
     @State private var videoComposition: AVMutableVideoComposition? = nil
     @State private var playhead: Double = 0
     @State private var timeObserver: Any? = nil
+    // Serializa prepare()/rebuild(): solo la construcción más reciente asigna.
+    @State private var buildGeneration = 0
+    @State private var isPlaying = false
+
+    private func togglePlay() {
+        guard let p = player else { return }
+        if p.rate == 0 {
+            p.play()
+            isPlaying = true
+        } else {
+            p.pause()
+            isPlaying = false
+        }
+    }
 
     init(sources: CompositionBuilder.Sources, folder: URL) {
         self.sources = sources
@@ -181,9 +231,12 @@ struct VideoEditorView: View {
         HSplitView {
             VStack(spacing: 0) {
                 if let player {
-                    EditorPlayerSurface(player: player)
-                        .background(Color.black)
-                        .layoutPriority(1)
+                    ZStack {
+                        PlainPlayerSurface(player: player)
+                        LiveCanvasOverlay(state: state, playhead: $playhead)
+                    }
+                    .background(Color.black)
+                    .layoutPriority(1)
                 } else {
                     ZStack {
                         Color.black
@@ -207,8 +260,12 @@ struct VideoEditorView: View {
             }
             .frame(minWidth: 640)
 
-            SegmentInspector(state: state, refresh: { refreshPausedFrame() })
-                .frame(minWidth: 300, maxWidth: 360)
+            SegmentInspector(state: state, playhead: $playhead,
+                             discoveredCamera: sources.cameraURL?.lastPathComponent,
+                             discoveredScreen: sources.screenURL?.lastPathComponent,
+                             onStructureChange: { Task { await rebuild() } },
+                             refresh: { refreshPausedFrame() })
+                .frame(minWidth: 300, maxWidth: 380)
         }
         .frame(minWidth: 980, minHeight: 640)
         .task { await prepare() }
@@ -228,6 +285,13 @@ struct VideoEditorView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 10) {
+            Button(action: { togglePlay() }) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(player == nil)
+            .help("Reproducir / pausar (espacio)")
+
             Button(action: { state.cut(at: playhead) }) {
                 Label("Cortar aquí", systemImage: "scissors")
             }
@@ -272,7 +336,13 @@ struct VideoEditorView: View {
 
     private func prepare() async {
         do {
-            let built = try await CompositionBuilder.build(sources)
+            // Las capas de vídeo necesitan pista propia: se leen del proyecto
+            // guardado ANTES de construir la composición.
+            buildGeneration += 1
+            let gen = buildGeneration
+            let saved = VideoProjectStore.load(folder: folder, duration: 0)
+            let built = try await CompositionBuilder.build(sources, extraLayers: saved.extraLayers)
+            guard gen == buildGeneration else { return }
             composition = built.composition
             videoComposition = built.video
             // El proyecto se RECARGA de disco ahora que la duración es real:
@@ -301,11 +371,49 @@ struct VideoEditorView: View {
         }
     }
 
+    // Cambió la ESTRUCTURA (capa de vídeo añadida/quitada, fuente sustituida):
+    // la composición se reconstruye con las pistas nuevas, conservando dónde
+    // estaba el cursor. Los cambios de dibujo no pasan por aquí.
+    private func rebuild() async {
+        let keep = playhead
+        state.flushSave()
+        buildGeneration += 1
+        let gen = buildGeneration
+        do {
+            let freshSources = CompositionBuilder.sources(inFolder: folder)
+            let src = freshSources ?? sources
+            let built = try await CompositionBuilder.build(src, extraLayers: state.project.extraLayers)
+            // Otro rebuild arrancó mientras este esperaba: el viejo se calla
+            // en vez de terminar último y pisar al nuevo.
+            guard gen == buildGeneration else { return }
+            composition = built.composition
+            videoComposition = built.video
+            var proj = state.project
+            proj.duration = built.duration
+            state.project = proj.sanitized()
+            let item = AVPlayerItem(asset: built.composition)
+            item.videoComposition = built.video
+            player?.replaceCurrentItem(with: item)
+            await player?.seek(to: CMTime(seconds: min(keep, built.duration), preferredTimescale: 600),
+                               toleranceBefore: .zero, toleranceAfter: .zero)
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
     // En pausa el fotograma no se refresca solo: se fuerza un redibujado.
+    // OJO: pedir seek AL MISMO instante es un no-op para AVPlayer (ya está
+    // ahí) y la imagen no se recompone — el arrastre movía el recuadro pero
+    // el vídeo quedaba congelado hasta el play. El microsalto de medio
+    // fotograma alternado obliga a redibujar SIEMPRE, y es invisible.
+    @State private var refreshFlip = false
+
     private func refreshPausedFrame() {
         guard let p = player, p.rate == 0 else { return }
-        let t = p.currentTime()
-        p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+        refreshFlip.toggle()
+        let jitter = CMTime(value: refreshFlip ? 1 : -1, timescale: 1200)
+        let target = CMTimeMaximum(.zero, CMTimeAdd(p.currentTime(), jitter))
+        p.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     private func seek(to seconds: Double) {
@@ -325,13 +433,20 @@ struct VideoEditorView: View {
         exporting = true
         exportProgress = 0
         exportError = nil
-        // La exportación lee una copia CONGELADA del proyecto: seguir moviendo
-        // sliders mientras exporta no contamina el archivo. Y usa su propia
-        // composición, así el reproductor no compite por los decodificadores.
-        CompositionParameters.shared.exportProject = state.project
+        // UNA copia congelada para todo el camino: la receta que dibuja el
+        // compositor y las capas con que se montan las pistas salen del mismo
+        // instante — seguir editando mientras exporta no contamina el archivo.
+        let snapshot = state.project
+        CompositionParameters.shared.exportProject = snapshot
         Task {
             do {
-                let built = try await CompositionBuilder.build(sources)
+                // Fuentes RELEÍDAS de disco: si el usuario sustituyó la cámara
+                // o la pantalla en esta sesión, el MP4 debe salir con lo que
+                // está viendo, no con lo que había al abrir la ventana.
+                // flushSave ya persistió los cambios, así que sources() los ve.
+                let src = CompositionBuilder.sources(inFolder: folder) ?? sources
+                let built = try await CompositionBuilder.build(src,
+                                                               extraLayers: snapshot.extraLayers)
                 built.video.customVideoCompositorClass = ExportCompositor.self
                 exportSession = CompositionExporter.export(
                     composition: built.composition, video: built.video,
@@ -444,6 +559,10 @@ struct TimelineStrip: View {
 // un control nuevo = añadir una sección; nada de esto toca el reproductor.
 struct SegmentInspector: View {
     @ObservedObject var state: VideoProjectState
+    @Binding var playhead: Double
+    let discoveredCamera: String?
+    let discoveredScreen: String?
+    let onStructureChange: () -> Void
     let refresh: () -> Void
 
     var body: some View {
@@ -470,6 +589,15 @@ struct SegmentInspector: View {
                     sourceSection(title: "Pantalla", keyPath: \.screen)
                 }
                 shapeSection
+                Divider()
+                LayersSection(state: state, playhead: $playhead,
+                              onStructureChange: onStructureChange)
+                Divider()
+                SourceOverrideSection(state: state,
+                                      discoveredCamera: discoveredCamera,
+                                      discoveredScreen: discoveredScreen,
+                                      onStructureChange: onStructureChange)
+                Divider()
                 backgroundSection
             }
             .padding(14)
@@ -743,19 +871,4 @@ struct SegmentInspector: View {
     }
 }
 
-// AVPlayerView trae controles del sistema (play, timeline) sin gestos que
-// estorben; el cursor propio de la tira va sincronizado por el observador.
-private struct EditorPlayerSurface: NSViewRepresentable {
-    let player: AVPlayer
 
-    func makeNSView(context: Context) -> AVPlayerView {
-        let v = AVPlayerView()
-        v.player = player
-        v.controlsStyle = .inline
-        return v
-    }
-
-    func updateNSView(_ view: AVPlayerView, context: Context) {
-        view.player = player
-    }
-}

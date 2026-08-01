@@ -20,6 +20,7 @@ enum SourceFit: String, Codable, CaseIterable {
     case fill     // cubre la ventana y recorta el sobrante (por defecto)
     case fit      // encaja entera, pueden quedar franjas
     case crop     // usa el rectángulo de recorte elegido por el usuario
+    case stretch  // deforma: estira a la ventana sin respetar proporción
 }
 
 // Recorte manual de una fuente: qué parte del fotograma original se usa.
@@ -127,6 +128,66 @@ struct NRect: Codable, Equatable {
     }
 }
 
+// MARK: - Capas extra
+
+// Un intervalo de visibilidad, en segundos del proyecto.
+struct LayerAppearance: Codable, Equatable {
+    var from: Double
+    var to: Double
+}
+
+// Una capa añadida por el usuario: un vídeo o una imagen suya, con su
+// posición, su forma, su orden y SUS TIEMPOS — aparece y desaparece cuando
+// él decida, las veces que decida.
+struct ExtraLayer: Codable, Equatable, Identifiable {
+    enum Kind: String, Codable { case video, image }
+
+    var id = UUID()
+    var kind: Kind
+    var path: String
+    var name: String
+    var rect = NRect(x: 0.62, y: 0.6, width: 0.32, height: 0.32)
+    var settings = SourceSettings()
+    var shape: SegmentLayout.Shape = .rect
+    var borderWidth: Double = 0
+    var opacity: Double = 1
+    // En modo cámara-sobre-pantalla: ¿la capa va entre la pantalla y la
+    // cámara flotante, o encima de todo? En los demás modos, detrás = fondo.
+    var behindCamera = false
+    // Vacío = visible durante todo el vídeo.
+    var appearances: [LayerAppearance] = []
+
+    func isVisible(at seconds: Double) -> Bool {
+        appearances.isEmpty
+            || appearances.contains { seconds >= $0.from && seconds < $0.to }
+    }
+
+    // Primer instante en que la capa existe (los vídeos arrancan aquí).
+    var firstAppearance: Double {
+        appearances.map(\.from).min() ?? 0
+    }
+
+    func sanitized(duration: Double) -> ExtraLayer {
+        var l = self
+        l.rect = l.rect.clamped(minSide: 0.03)
+        l.opacity = min(1, max(0.05, l.opacity))
+        l.borderWidth = min(0.05, max(0, l.borderWidth))
+        l.settings.crop = l.settings.crop.clamped()
+        // Un intervalo más allá de la duración actual NO se destruye: si la
+        // fuente cambia y el vídeo vuelve a ser largo, el intervalo sigue ahí
+        // (y mientras tanto es inofensivo: isVisible nunca lo alcanza).
+        l.appearances = l.appearances
+            .map { a -> LayerAppearance in
+                var a2 = LayerAppearance(from: max(0, a.from), to: a.to)
+                if duration > 0 && a2.from < duration { a2.to = min(duration, a2.to) }
+                return a2
+            }
+            .filter { $0.to > $0.from }
+            .sorted { $0.from < $1.from }
+        return l
+    }
+}
+
 // MARK: - El proyecto
 
 struct VideoProject: Codable, Equatable {
@@ -134,6 +195,27 @@ struct VideoProject: Codable, Equatable {
     var layouts: [SegmentLayout] = [SegmentLayout()]
     var background: BackgroundStyle = .default
     var duration: Double = 0                       // de la composición ya recortada
+    // Capas del usuario, dibujadas en el orden del array (última = más arriba).
+    var extraLayers: [ExtraLayer] = []
+    // Fuentes propias: sustituyen a la cámara o pantalla grabadas (o las
+    // aportan si la grabación no las tiene). Rutas absolutas elegidas por él.
+    var cameraOverridePath: String? = nil
+    var screenOverridePath: String? = nil
+
+    // Los project.json de la versión anterior no traen los campos nuevos:
+    // se decodifican con sus valores por defecto en vez de fallar.
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cuts = try c.decodeIfPresent([Double].self, forKey: .cuts) ?? []
+        layouts = try c.decodeIfPresent([SegmentLayout].self, forKey: .layouts) ?? [SegmentLayout()]
+        background = try c.decodeIfPresent(BackgroundStyle.self, forKey: .background) ?? .default
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+        extraLayers = try c.decodeIfPresent([ExtraLayer].self, forKey: .extraLayers) ?? []
+        cameraOverridePath = try c.decodeIfPresent(String.self, forKey: .cameraOverridePath)
+        screenOverridePath = try c.decodeIfPresent(String.self, forKey: .screenOverridePath)
+    }
 
     // Invariante: layouts.count == cuts.count + 1. Todo lo que muta pasa por
     // estas operaciones; no hay forma de crear huecos ni desajustes.
@@ -208,6 +290,7 @@ struct VideoProject: Codable, Equatable {
         while p.layouts.count < p.cuts.count + 1 { p.layouts.append(p.layouts.last ?? SegmentLayout()) }
         while p.layouts.count > p.cuts.count + 1 { p.layouts.removeLast() }
         p.layouts = p.layouts.map { $0.sanitized() }
+        p.extraLayers = p.extraLayers.map { $0.sanitized(duration: p.duration) }
         return p
     }
 }

@@ -55,13 +55,18 @@ final class PiPInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let passthroughTrackID = kCMPersistentTrackID_Invalid
     let screenTrack: CMPersistentTrackID
     let cameraTrack: CMPersistentTrackID
+    // Pista de cada capa de vídeo del usuario (las imágenes no necesitan pista).
+    let layerTracks: [UUID: CMPersistentTrackID]
 
-    init(timeRange: CMTimeRange, screenTrack: CMPersistentTrackID, cameraTrack: CMPersistentTrackID) {
+    init(timeRange: CMTimeRange, screenTrack: CMPersistentTrackID,
+         cameraTrack: CMPersistentTrackID,
+         layerTracks: [UUID: CMPersistentTrackID] = [:]) {
         self.timeRange = timeRange
         self.screenTrack = screenTrack
         self.cameraTrack = cameraTrack
+        self.layerTracks = layerTracks
         // Solo las pistas que existen: con una fuente única la otra es Invalid.
-        self.requiredSourceTrackIDs = [screenTrack, cameraTrack]
+        self.requiredSourceTrackIDs = ([screenTrack, cameraTrack] + layerTracks.values)
             .filter { $0 != kCMPersistentTrackID_Invalid }
             .map { NSNumber(value: $0) }
     }
@@ -103,9 +108,26 @@ class PiPCompositor: NSObject, AVVideoCompositing {
             let camera = instruction.cameraTrack == kCMPersistentTrackID_Invalid ? nil
                 : request.sourceFrame(byTrackID: instruction.cameraTrack).map { CIImage(cvPixelBuffer: $0) }
 
+            // Fotograma de cada capa visible en este instante: los vídeos
+            // salen de su pista; las imágenes, de la cache de decodificación.
+            var layerImages: [UUID: CIImage] = [:]
+            for layer in project.extraLayers where layer.isVisible(at: seconds) {
+                switch layer.kind {
+                case .video:
+                    if let tid = instruction.layerTracks[layer.id],
+                       let buf = request.sourceFrame(byTrackID: tid) {
+                        layerImages[layer.id] = CIImage(cvPixelBuffer: buf)
+                    }
+                case .image:
+                    layerImages[layer.id] = FrameComposer.layerImage(layer.path)
+                }
+            }
+
             let image = FrameComposer.compose(screen: screen, camera: camera,
                                               layout: layout, background: project.background,
-                                              canvas: size)
+                                              canvas: size, seconds: seconds,
+                                              extraLayers: project.extraLayers,
+                                              layerImages: layerImages)
             self.context.render(image, to: out)
             request.finish(withComposedVideoFrame: out)
         }
@@ -120,22 +142,81 @@ enum FrameComposer {
 
     static func compose(screen: CIImage?, camera: CIImage?,
                         layout: SegmentLayout, background: BackgroundStyle,
-                        canvas: CGSize) -> CIImage {
+                        canvas: CGSize, seconds: Double = 0,
+                        extraLayers: [ExtraLayer] = [],
+                        layerImages: [UUID: CIImage] = [:]) -> CIImage {
+        let base = composeBase(screen: screen, camera: camera, layout: layout,
+                               background: background, canvas: canvas,
+                               seconds: seconds, extraLayers: extraLayers,
+                               layerImages: layerImages)
+        // Capas de encima, en el orden del proyecto (la última va más arriba).
+        var result = base
+        for layer in extraLayers where !layer.behindCamera {
+            result = drawLayer(layer, image: layerImages[layer.id],
+                               at: seconds, over: result, canvas: canvas)
+        }
+        return result
+    }
+
+    // Dibuja una capa del usuario sobre lo ya compuesto, si le toca verse.
+    private static func drawLayer(_ layer: ExtraLayer, image: CIImage?,
+                                  at seconds: Double, over result: CIImage,
+                                  canvas: CGSize) -> CIImage {
+        guard layer.isVisible(at: seconds), let image else { return result }
+        let rect = ciRect(layer.rect.cgRect, canvas: canvas)
+        let side = min(rect.width, rect.height)
+        let window = layer.shape == .circle
+            ? CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2,
+                     width: side, height: side)
+            : rect
+        var piece = place(image, settings: layer.settings, into: window)
+        var shapeProxy = SegmentLayout()
+        shapeProxy.borderWidth = layer.borderWidth
+        piece = shaped(piece, shape: layer.shape, layout: shapeProxy, canvas: canvas)
+        if layer.opacity < 1 {
+            piece = piece.applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: layer.opacity),
+            ])
+        }
+        return piece.composited(over: result)
+    }
+
+    // Imagen de una capa (cacheada igual que el fondo).
+    static func layerImage(_ path: String) -> CIImage? {
+        cachedImage(path)
+    }
+
+    private static func composeBase(screen: CIImage?, camera: CIImage?,
+                                    layout: SegmentLayout, background: BackgroundStyle,
+                                    canvas: CGSize, seconds: Double,
+                                    extraLayers: [ExtraLayer],
+                                    layerImages: [UUID: CIImage]) -> CIImage {
         let bg = backgroundImage(background, canvas: canvas)
+
+        // Capas "detrás de la cámara": entre el contenido base y la cámara
+        // flotante en modo overlay; bajo todo lo demás en el resto de modos.
+        func withBehindLayers(_ current: CIImage) -> CIImage {
+            var r = current
+            for layer in extraLayers where layer.behindCamera {
+                r = drawLayer(layer, image: layerImages[layer.id],
+                              at: seconds, over: r, canvas: canvas)
+            }
+            return r
+        }
 
         switch layout.mode {
         case .onlyScreen:
-            guard let screen else { return bg }
+            guard let screen else { return withBehindLayers(bg) }
             return place(screen, settings: layout.screen,
                          into: CGRect(origin: .zero, size: canvas))
-                .composited(over: bg)
+                .composited(over: withBehindLayers(bg))
         case .onlyCamera:
-            guard let camera else { return bg }
+            guard let camera else { return withBehindLayers(bg) }
             return place(camera, settings: layout.camera,
                          into: CGRect(origin: .zero, size: canvas))
-                .composited(over: bg)
+                .composited(over: withBehindLayers(bg))
         case .sideBySide:
-            var result = bg
+            var result = withBehindLayers(bg)
             let m = canvas.width * 0.02
             let usable = canvas.width - 3 * m
             // El reparto es la fracción del ancho para la cámara: 30/70, 50/50…
@@ -163,6 +244,7 @@ enum FrameComposer {
                                into: CGRect(origin: .zero, size: canvas))
                     .composited(over: result)
             }
+            result = withBehindLayers(result)
             if let camera {
                 let rect = ciRect(layout.camRect.cgRect, canvas: canvas)
                 // El círculo exige ventana cuadrada: se centra en el lado menor.
@@ -203,14 +285,20 @@ enum FrameComposer {
         }
         let s = source.extent
         guard s.width > 0, s.height > 0 else { return source }
-        let scale: CGFloat
+        let sx: CGFloat, sy: CGFloat
         switch settings.fit {
         case .fill, .crop:
-            scale = max(rect.width / s.width, rect.height / s.height)
+            let k = max(rect.width / s.width, rect.height / s.height)
+            sx = k; sy = k
         case .fit:
-            scale = min(rect.width / s.width, rect.height / s.height)
+            let k = min(rect.width / s.width, rect.height / s.height)
+            sx = k; sy = k
+        case .stretch:
+            // Deformar: cada eje a su escala, la proporción no se respeta.
+            sx = rect.width / s.width
+            sy = rect.height / s.height
         }
-        let scaled = source.transformed(by: .init(scaleX: scale, y: scale))
+        let scaled = source.transformed(by: .init(scaleX: sx, y: sy))
         let dx = rect.midX - scaled.extent.midX
         let dy = rect.midY - scaled.extent.midY
         let moved = scaled.transformed(by: .init(translationX: dx, y: dy))
@@ -382,30 +470,41 @@ enum CompositionBuilder {
         let offsetSeconds: Double   // pantalla − cámara, del sync.json
     }
 
-    // Carga una carpeta de grabación (los dos .mov + sync.json).
+    // Carga una carpeta de grabación (los dos .mov + sync.json). Las fuentes
+    // PROPIAS del proyecto mandan: el usuario puede poner su vídeo en lugar
+    // de la pantalla o de la cámara grabadas, o aportarlas si no existen.
     static func sources(inFolder folder: URL) -> Sources? {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
-            return nil
-        }
-        let cam = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") })
-        let scr = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") })
-        // Con UNA sola pieza también se puede componer (recortes y fondo
-        // siguen valiendo); la grabación de fábrica es solo-cámara.
-        guard cam != nil || scr != nil else { return nil }
+        let files = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        var cam = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") })
+        var scr = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") })
         var offset = 0.0
         if let data = try? Data(contentsOf: folder.appendingPathComponent("sync.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let o = json["offsetSeconds"] as? Double {
             offset = o
         }
+        if let data = try? Data(contentsOf: VideoProjectStore.projectURL(inFolder: folder)),
+           let project = try? JSONDecoder().decode(VideoProject.self, from: data) {
+            if let c = project.cameraOverridePath, fm.fileExists(atPath: c) {
+                cam = URL(fileURLWithPath: c)
+                offset = 0   // el desfase medido solo vale para lo grabado junto
+            }
+            if let s = project.screenOverridePath, fm.fileExists(atPath: s) {
+                scr = URL(fileURLWithPath: s)
+                offset = 0
+            }
+        }
+        // Con UNA sola pieza también se puede componer (recortes y fondo
+        // siguen valiendo); la grabación de fábrica es solo-cámara.
+        guard cam != nil || scr != nil else { return nil }
         return Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset)
     }
 
     // Composición alineada y recortada a la pista más corta. La regla dura:
     // las instrucciones deben teselar [0, duración] sin huecos ni solapes, o
     // la exportación revienta con -11841 (aquí: una sola instrucción total).
-    static func build(_ src: Sources) async throws
+    static func build(_ src: Sources, extraLayers: [ExtraLayer] = []) async throws
         -> (composition: AVMutableComposition, video: AVMutableVideoComposition, duration: Double) {
         let screenAsset = src.screenURL.map { AVURLAsset(url: $0) }
         let cameraAsset = src.cameraURL.map { AVURLAsset(url: $0) }
@@ -460,13 +559,37 @@ enum CompositionBuilder {
                 of: audio, at: .zero)
         }
 
+        // Cada capa de VÍDEO del usuario es una pista más. Arranca en su
+        // primera aparición y avanza de corrido; su audio no se mezcla (el
+        // audio del montaje es el de la cámara). Si el archivo no existe o no
+        // tiene vídeo, la capa simplemente no se dibuja: no revienta nada.
+        var layerTracks: [UUID: CMPersistentTrackID] = [:]
+        for layer in extraLayers where layer.kind == .video {
+            let url = URL(fileURLWithPath: layer.path)
+            guard FileManager.default.fileExists(atPath: layer.path) else { continue }
+            let asset = AVURLAsset(url: url)
+            guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+                  let layerDur = try? await asset.load(.duration).seconds else { continue }
+            let start = min(max(0, layer.firstAppearance), usable)
+            let available = min(layerDur, usable - start)
+            guard available > 0.05 else { continue }
+            let vTrack = comp.addMutableTrack(withMediaType: .video,
+                                              preferredTrackID: kCMPersistentTrackID_Invalid)!
+            try? vTrack.insertTimeRange(
+                CMTimeRange(start: .zero,
+                            duration: CMTime(seconds: available, preferredTimescale: 600)),
+                of: track, at: CMTime(seconds: start, preferredTimescale: 600))
+            layerTracks[layer.id] = vTrack.trackID
+        }
+
         let video = AVMutableVideoComposition()
         video.customVideoCompositorClass = PiPCompositor.self
         video.renderSize = CGSize(width: 1920, height: 1080)
         video.frameDuration = CMTime(value: 1, timescale: 30)
         video.instructions = [PiPInstruction(
             timeRange: CMTimeRange(start: .zero, duration: duration),
-            screenTrack: screenID, cameraTrack: cameraID)]
+            screenTrack: screenID, cameraTrack: cameraID,
+            layerTracks: layerTracks)]
         return (comp, video, usable)
     }
 }

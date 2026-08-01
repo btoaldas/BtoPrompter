@@ -173,6 +173,29 @@ enum SelfTest {
                && survived.layouts.count == project.layouts.count,
                "duración desconocida conserva cortes y tramos")
 
+        // Capas: visibilidad por tiempo y saneo.
+        var capa = ExtraLayer(kind: .image, path: "/tmp/x.png", name: "x")
+        expect(capa.isVisible(at: 0) && capa.isVisible(at: 99),
+               "capa sin intervalos se ve siempre")
+        capa.appearances = [LayerAppearance(from: 1, to: 3), LayerAppearance(from: 5, to: 6)]
+        expect(capa.isVisible(at: 2) && !capa.isVisible(at: 4) && capa.isVisible(at: 5.5),
+               "capa con intervalos aparece y desaparece")
+        expect(!capa.isVisible(at: 3), "el intervalo es [desde, hasta): en el corte ya no se ve")
+        expect(capa.firstAppearance == 1, "el vídeo de la capa arranca en su primera aparición")
+        capa.appearances = [LayerAppearance(from: -2, to: 99), LayerAppearance(from: 4, to: 2)]
+        let capaS = capa.sanitized(duration: 10)
+        expect(capaS.appearances.count == 1 && capaS.appearances[0].from == 0
+               && capaS.appearances[0].to == 10,
+               "saneo de capas recorta al vídeo y tira intervalos invertidos")
+        // Un project.json de la versión anterior (sin capas) carga sin fallar.
+        let v1JSON = #"{"cuts":[2],"duration":8,"layouts":[{"mode":"overlay","camRect":{"x":0.7,"y":0.6,"width":0.25,"height":0.34},"shape":"circle","borderWidth":0.01,"splitRatio":0.5,"camera":{"fit":"fill","crop":{"x":0,"y":0,"width":1,"height":1}},"screen":{"fit":"fill","crop":{"x":0,"y":0,"width":1,"height":1}}},{"mode":"sideBySide","camRect":{"x":0.7,"y":0.6,"width":0.25,"height":0.34},"shape":"rounded","borderWidth":0.01,"splitRatio":0.3,"camera":{"fit":"fill","crop":{"x":0,"y":0,"width":1,"height":1}},"screen":{"fit":"fill","crop":{"x":0,"y":0,"width":1,"height":1}}}],"background":{"color":{"_0":{"r":0.1,"g":0.1,"b":0.1,"a":1}}}}"#
+        if let old = try? JSONDecoder().decode(VideoProject.self, from: Data(v1JSON.utf8)) {
+            expect(old.cuts == [2] && old.extraLayers.isEmpty && old.cameraOverridePath == nil,
+                   "project.json v1 carga con capas vacías")
+        } else {
+            expect(false, "project.json v1 carga con capas vacías")
+        }
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",
