@@ -116,13 +116,24 @@ struct AboutTab: View {
                 }
                 if checker.latestURL != nil {
                     Button {
-                        checker.openDownload()
+                        checker.applyUpdate()
                     } label: {
-                        Label("Descargar", systemImage: "arrow.down.circle.fill")
+                        if checker.installing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label(checker.autoInstall ? "Actualizar ahora" : "Descargar",
+                                  systemImage: "arrow.down.circle.fill")
+                        }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(checker.installing)
                 }
             }
+            Toggle("Instalar actualizaciones automáticamente (sin abrir el navegador)", isOn: .init(
+                get: { checker.autoInstall },
+                set: { checker.autoInstall = $0 }
+            ))
+            .font(.system(size: 11))
             if let status = checker.status {
                 Text(status)
                     .font(.system(size: 11))

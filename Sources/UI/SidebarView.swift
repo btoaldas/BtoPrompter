@@ -198,10 +198,13 @@ struct SidebarView: View {
                 if checker.checking {
                     ProgressView().controlSize(.mini)
                 } else if checker.latestURL != nil {
-                    Button("¡Actualización disponible!") { checker.openDownload() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Theme.accent)
+                    Button(checker.installing ? "Instalando…" : "¡Actualización disponible!") {
+                        checker.applyUpdate()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.accent)
+                    .disabled(checker.installing)
                 } else {
                     Button("Buscar actualizaciones") { checker.check() }
                         .buttonStyle(.plain)

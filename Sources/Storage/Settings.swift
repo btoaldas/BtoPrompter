@@ -10,7 +10,7 @@ enum Settings {
         case wpm, fontSize, bgOpacity, spyMode, guideTitles, selectedID
         case miniMode, miniFontSize
         case countdownSeconds, autoPlay, keepAwake, accentColorID, voiceFollow
-        case rehearsalStats
+        case rehearsalStats, autoInstallUpdates
         case aiEnabled, aiProvider, aiModel, aiBaseURL, aiStyle, aiCustomPrompt
         // Claves históricas de la v1.0 (migradas a la biblioteca).
         case legacyScript = "script"

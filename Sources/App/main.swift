@@ -40,6 +40,33 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-ai"), CommandLine.argume
     exit(0)
 }
 
+// Prueba de la actualización automática SIN instalar: descarga el último
+// release, lo descomprime y valida el paquete.
+if CommandLine.arguments.contains("--test-update") {
+    let sem = DispatchSemaphore(value: 0)
+    var req = URLRequest(url: URL(string: "https://api.github.com/repos/btoaldas/BtoPrompter/releases/latest")!)
+    req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+    URLSession.shared.dataTask(with: req) { data, _, _ in
+        DispatchQueue.main.async {
+            guard let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let assets = json["assets"] as? [[String: Any]],
+                  let zip = assets.first(where: { ($0["name"] as? String)?.hasSuffix(".zip") == true }),
+                  let dl = zip["browser_download_url"] as? String else {
+                print("ERROR: no se pudo leer el último release")
+                exit(1)
+            }
+            UpdateChecker.shared.assetURL = URL(string: dl)
+            UpdateChecker.shared.downloadAndInstall(dryRun: true) { ok in
+                print(UpdateChecker.shared.status ?? "(sin estado)")
+                sem.signal()
+                exit(ok ? 0 : 1)
+            }
+        }
+    }.resume()
+    RunLoop.main.run()
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
