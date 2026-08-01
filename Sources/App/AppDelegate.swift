@@ -116,6 +116,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    @objc private func openSettings() {
+        window.makeKeyAndOrderFront(nil)
+        PrompterModel.shared.showSettings = true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         GlobalHotKeys.shared.unregister()
         SpeechStore.shared.saveNow()
@@ -141,6 +146,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Configuración…",
+                                      action: #selector(openSettings),
+                                      keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Salir de BtoPrompter",
                                    action: #selector(NSApplication.terminate(_:)),
                                    keyEquivalent: "q"))

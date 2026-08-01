@@ -2,21 +2,26 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-// Barra lateral de la biblioteca: carpetas, discursos, borradores, archivados,
-// importación de archivos y acciones por fila (menú contextual).
+// Barra lateral de la biblioteca: carpetas colapsables, discursos, borradores,
+// archivados, importación, arrastrar-y-soltar a carpetas, configuración y pie
+// con versión + actualizaciones.
 
 struct SidebarView: View {
     @EnvironmentObject var model: PrompterModel
     @EnvironmentObject var store: SpeechStore
+    @ObservedObject private var checker = UpdateChecker.shared
     @State private var newFolderPrompt = false
     @State private var newFolderName = ""
     @State private var pendingDelete: SpeechDoc? = nil
+    @State private var collapsed: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: "collapsedFolders") ?? [])
 
     var body: some View {
         VStack(spacing: 0) {
             header
             importStatusRow
             speechList
+            footer
         }
         .background(Color.white.opacity(0.04))
         .alert("Nueva carpeta", isPresented: $newFolderPrompt) {
@@ -44,6 +49,8 @@ struct SidebarView: View {
         }
     }
 
+    // MARK: Cabecera
+
     private var header: some View {
         HStack(spacing: 12) {
             Text("BtoPrompter")
@@ -58,6 +65,8 @@ struct SidebarView: View {
                 .buttonStyle(.plain).help("Nueva carpeta")
             Button { openImportPanel() } label: { Image(systemName: "square.and.arrow.down") }
                 .buttonStyle(.plain).help("Importar archivos (txt, md, pptx, audio)")
+            Button { model.showSettings = true } label: { Image(systemName: "gearshape.fill") }
+                .buttonStyle(.plain).help("Configuración (⌘,)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -75,40 +84,62 @@ struct SidebarView: View {
         }
     }
 
+    // MARK: Lista
+
     private var speechList: some View {
         List {
-            Section("Discursos") {
+            Section {
                 ForEach(store.speeches(inFolder: "", archived: false)) { doc in
                     row(doc)
                 }
+            } header: {
+                Text("Discursos")
+                    .dropDestinationForSpeech { id in
+                        store.update(id) { $0.folder = ""; $0.isArchived = false }
+                    }
             }
             ForEach(store.allFolders, id: \.self) { folder in
-                Section {
+                DisclosureGroup(isExpanded: expansionBinding(folder)) {
                     ForEach(store.speeches(inFolder: folder, archived: false)) { doc in
                         row(doc)
                     }
-                } header: {
-                    HStack {
-                        Label(folder, systemImage: "folder")
-                        Spacer()
-                    }
-                    .contextMenu {
-                        Button("Eliminar carpeta (los discursos pasan a la raíz)") {
-                            store.deleteFolder(folder)
+                } label: {
+                    Label(folder, systemImage: "folder")
+                        .dropDestinationForSpeech { id in
+                            store.update(id) { $0.folder = folder; $0.isArchived = false }
                         }
-                    }
+                        .contextMenu {
+                            Button("Eliminar carpeta (los discursos pasan a la raíz)") {
+                                store.deleteFolder(folder)
+                            }
+                        }
                 }
             }
             if !store.archivedSpeeches.isEmpty {
-                Section("Archivados") {
+                DisclosureGroup(isExpanded: expansionBinding("__archived__")) {
                     ForEach(store.archivedSpeeches) { doc in
                         row(doc)
                     }
+                } label: {
+                    Label("Archivados", systemImage: "archivebox")
+                        .dropDestinationForSpeech { id in
+                            store.update(id) { $0.isArchived = true }
+                        }
                 }
             }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
+    }
+
+    private func expansionBinding(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsed.contains(key) },
+            set: { expanded in
+                if expanded { collapsed.remove(key) } else { collapsed.insert(key) }
+                UserDefaults.standard.set(Array(collapsed), forKey: "collapsedFolders")
+            }
+        )
     }
 
     private func row(_ doc: SpeechDoc) -> some View {
@@ -131,6 +162,8 @@ struct SidebarView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { model.selectedID = doc.id }
+        // Arrastra la fila hasta el nombre de una carpeta para moverla ahí.
+        .onDrag { NSItemProvider(object: doc.id.uuidString as NSString) }
         .contextMenu {
             Button("Iniciar prompter") {
                 model.selectedID = doc.id
@@ -153,6 +186,40 @@ struct SidebarView: View {
         }
     }
 
+    // MARK: Pie: versión y actualizaciones
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack(spacing: 6) {
+                Text("v\(checker.currentVersion)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray)
+                if checker.checking {
+                    ProgressView().controlSize(.mini)
+                } else if checker.latestURL != nil {
+                    Button("¡Actualización disponible!") { checker.openDownload() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Theme.accent)
+                } else {
+                    Button("Buscar actualizaciones") { checker.check() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                }
+                Spacer()
+            }
+            if let status = checker.status, checker.latestURL == nil {
+                Text(status)
+                    .font(.system(size: 9))
+                    .foregroundColor(status.contains("✓") ? .green : .gray)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
     private func openImportPanel() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
@@ -165,6 +232,21 @@ struct SidebarView: View {
         panel.message = "Importa discursos desde texto, Markdown, PowerPoint o audio (se transcribe)"
         if panel.runModal() == .OK {
             store.importFiles(urls: panel.urls, folder: "")
+        }
+    }
+}
+
+// Destino de arrastre que recibe el UUID de un discurso.
+private extension View {
+    func dropDestinationForSpeech(_ perform: @escaping (UUID) -> Void) -> some View {
+        onDrop(of: [UTType.plainText], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: NSString.self) { s, _ in
+                if let s = s as? String, let id = UUID(uuidString: s) {
+                    DispatchQueue.main.async { perform(id) }
+                }
+            }
+            return true
         }
     }
 }

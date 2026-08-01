@@ -1,21 +1,27 @@
 import SwiftUI
 
-// Hoja de configuración y ejecución del Ensayo con IA.
+// Formulario de configuración del Ensayo con IA — reutilizado por la hoja
+// rápida (botón "Ensayo IA" del editor) y por Configuración → pestaña IA.
+// La API key se guarda en SecretsStore en cada cambio.
 
-struct AISheet: View {
+struct AIConfigForm: View {
     @EnvironmentObject var model: PrompterModel
-    @Environment(\.dismiss) private var dismiss
     @State private var keyDraft: String = ""
+
+    private var keyBinding: Binding<String> {
+        Binding(
+            get: { keyDraft },
+            set: { v in
+                keyDraft = v
+                model.setAIKey(v, for: model.aiProvider)
+            }
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Ensayo con IA", systemImage: "sparkles")
-                    .font(.system(size: 15, weight: .bold))
-                Spacer()
-                Toggle("Activar", isOn: $model.aiEnabled)
-                    .toggleStyle(.switch)
-            }
+            Toggle("Activar Ensayo con IA", isOn: $model.aiEnabled)
+                .toggleStyle(.switch)
             Text("La IA marca el ritmo del discurso — pausas (…), guías de actuación (//) y velocidades por tramo [v+20] — sin cambiar ninguna de tus palabras. El resultado se guarda como un discurso nuevo; el original queda intacto.")
                 .font(.system(size: 11))
                 .foregroundColor(.gray)
@@ -38,9 +44,8 @@ struct AISheet: View {
             }
             TextField("Modelo", text: $model.aiModel)
                 .textFieldStyle(.roundedBorder)
-            SecureField("API key del proveedor", text: $keyDraft)
+            SecureField("API key del proveedor (se guarda solo en tu Mac)", text: keyBinding)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit { model.setAIKey(keyDraft, for: model.aiProvider) }
 
             Picker("Estilo", selection: $model.aiStyle) {
                 ForEach(AIRehearsal.styles, id: \.id) { s in
@@ -69,22 +74,36 @@ struct AISheet: View {
                         .foregroundColor(model.aiBusy ? .orange : (status.hasPrefix("✓") ? .green : .red))
                 }
             }
+        }
+        .onAppear { keyDraft = model.aiKey(for: model.aiProvider) }
+    }
 
+    var hasKey: Bool { !keyDraft.isEmpty }
+}
+
+// Hoja rápida desde el editor: formulario + botón de ejecutar.
+struct AISheet: View {
+    @EnvironmentObject var model: PrompterModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Ensayo con IA", systemImage: "sparkles")
+                .font(.system(size: 15, weight: .bold))
+            AIConfigForm()
             HStack {
                 Button("Cerrar") { dismiss() }
                 Spacer()
                 Button {
-                    model.setAIKey(keyDraft, for: model.aiProvider)
                     model.runAIRehearsal()
                 } label: {
                     Label("Preparar discurso", systemImage: "wand.and.stars")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!model.aiEnabled || model.aiBusy || keyDraft.isEmpty)
+                .disabled(!model.aiEnabled || model.aiBusy || model.aiKey(for: model.aiProvider).isEmpty)
             }
         }
         .padding(16)
         .frame(width: 440)
-        .onAppear { keyDraft = model.aiKey(for: model.aiProvider) }
     }
 }

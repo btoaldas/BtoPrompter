@@ -67,6 +67,7 @@ final class PrompterModel: ObservableObject {
     }
     @Published var aiStatus: String? = nil
     @Published var aiBusy: Bool = false
+    @Published var showSettings: Bool = false
 
     private var pendingWork: DispatchWorkItem?
 

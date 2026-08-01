@@ -17,6 +17,10 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $model.showSettings) {
+            SettingsSheet()
+                .environmentObject(model)
+        }
     }
 }
 
