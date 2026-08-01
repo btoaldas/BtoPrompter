@@ -218,6 +218,17 @@ final class RecordingEngine: NSObject, ObservableObject {
         }
         try? lines.joined(separator: "\n")
             .write(to: folder.appendingPathComponent("sync.txt"), atomically: true, encoding: .utf8)
+        // Versión para máquinas: el editor de composición la lee para alinear.
+        if let cam = firstFrameTimes["camara"], let scr = firstFrameTimes["pantalla"] {
+            let payload: [String: Any] = [
+                "offsetSeconds": scr.timeIntervalSince(cam),
+                "camera": "camara-\(folder.lastPathComponent).mov",
+                "screen": "pantalla-\(folder.lastPathComponent).mov",
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
+                try? data.write(to: folder.appendingPathComponent("sync.json"))
+            }
+        }
     }
 
     func stop() {
@@ -250,7 +261,14 @@ final class RecordingEngine: NSObject, ObservableObject {
         phase = .idle
         status = "Grabación guardada"
         if let f = lastFolder {
-            NSWorkspace.shared.activateFileViewerSelecting([f])
+            // Con el editor activado y las DOS piezas grabadas, se ofrece
+            // componer de una vez; si no, se enseña la carpeta como siempre.
+            if VideoEditorWindowController.enabled,
+               CompositionBuilder.sources(inFolder: f) != nil {
+                VideoEditorWindowController.shared.open(folder: f)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([f])
+            }
         }
     }
 

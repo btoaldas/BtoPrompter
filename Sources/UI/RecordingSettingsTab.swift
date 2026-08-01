@@ -15,6 +15,7 @@ struct RecordingSettingsTab: View {
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
     @State private var cameraDevice = Settings.string(.recordCameraDevice, default: "")
     @State private var cameras: [(id: String, name: String)] = []
+    @State private var editor = Settings.bool(.videoEditorEnabled, default: false)
 
     var body: some View {
         Form {
@@ -77,6 +78,15 @@ struct RecordingSettingsTab: View {
                         }
                         Button("Cambiar…") { chooseFolder() }
                     }
+                }
+
+                Section("Editor de composición") {
+                    Toggle("Activar el editor (menú «Componer grabación…», ⌘E)", isOn: $editor)
+                        .onChange(of: editor) { v in Settings.set(v, .videoEditorEnabled) }
+                    Text("Junta cámara y pantalla en un solo vídeo con presets (círculo, "
+                         + "lado a lado…) y exporta MP4. El cambio en el menú se aplica al reabrir la app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let s = engine.status {

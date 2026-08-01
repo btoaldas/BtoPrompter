@@ -174,6 +174,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setFrame(Theme.normalFrame(for: screen), display: true, animate: true)
     }
 
+    @objc func openVideoEditor() {
+        MainActor.assumeIsolated {
+            VideoEditorWindowController.shared.open()
+        }
+    }
+
     @objc private func openSettings() {
         window.makeKeyAndOrderFront(nil)
         PrompterModel.shared.showSettings = true
@@ -212,6 +218,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
+        // Solo existe con el editor activado en Ajustes; apagado = ni menú.
+        if Settings.bool(.videoEditorEnabled, default: false) {
+            appMenu.addItem(NSMenuItem(title: "Componer grabación…",
+                                       action: #selector(openVideoEditor), keyEquivalent: "e"))
+            appMenu.addItem(NSMenuItem.separator())
+        }
         appMenu.addItem(NSMenuItem(title: "Salir de BtoPrompter",
                                    action: #selector(NSApplication.terminate(_:)),
                                    keyEquivalent: "q"))

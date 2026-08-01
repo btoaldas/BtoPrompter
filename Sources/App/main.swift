@@ -25,6 +25,47 @@ if CommandLine.arguments.contains("--test-sharing") {
     app.run()
 }
 
+// Composición sin interfaz: junta cámara y pantalla de una carpeta de
+// grabación y exporta el MP4. Prueba reproducible del editor completo.
+if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.arguments.count > i + 2 {
+    let folder = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+    let out = URL(fileURLWithPath: CommandLine.arguments[i + 2])
+    guard let sources = CompositionBuilder.sources(inFolder: folder) else {
+        print("ERROR: la carpeta no tiene cámara + pantalla + sync.json")
+        exit(1)
+    }
+    print("desfase aplicado: \(Int(sources.offsetSeconds * 1000)) ms")
+    if CommandLine.arguments.count > i + 3,
+       let idx = Int(CommandLine.arguments[i + 3]),
+       idx >= 0, idx < CompositionLayout.presets.count {
+        CompositionParameters.shared.layout = CompositionLayout.presets[idx].layout
+        print("preset: \(CompositionLayout.presets[idx].name)")
+    }
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        do {
+            let built = try await CompositionBuilder.build(sources)
+            CompositionExporter.export(composition: built.composition, video: built.video,
+                                       to: out, progress: { _ in }) { result in
+                switch result {
+                case .success(let url):
+                    let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                    print("OK: \(url.path) (\(size / 1024) KB)")
+                    exit(0)
+                case .failure(let error):
+                    print("ERROR: \(error.localizedDescription)")
+                    exit(1)
+                }
+            }
+        } catch {
+            print("ERROR: \(error.localizedDescription)")
+            exit(1)
+        }
+        sem.signal()
+    }
+    RunLoop.main.run()
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.arguments.count > i + 1 {
     let url = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     print(SpeechStore.extractPPTX(url) ?? "ERROR: no se pudo extraer texto")
