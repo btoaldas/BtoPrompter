@@ -28,5 +28,7 @@
 	<string>BtoPrompter transcribe archivos de audio y puede seguir tu lectura en vivo para avanzar el guion.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>BtoPrompter escucha tu voz (solo en este equipo) para avanzar el guion mientras hablas.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>BtoPrompter puede avanzar tus diapositivas de Keynote o PowerPoint cuando el guion cruza una marca de diapositiva.</string>
 </dict>
 </plist>

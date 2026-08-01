@@ -26,6 +26,12 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
 - ⚙️ **Configuración central** (engranaje o `⌘,`): velocidad, letras, transparencia, comportamiento, proveedor de IA y comprobación de actualizaciones contra GitHub Releases.
 - ⏱️ **Cuenta regresiva y autoplay** — 3-2-1 configurable (0–10 s) antes de arrancar, y opción de reproducir automáticamente al entrar al prompter.
+- 🗣️ **Seguimiento por voz (opcional)** — el prompter te escucha (reconocimiento local de Apple, sin internet) y avanza al ritmo real de tu lectura; si improvisas o te saltas una frase, te espera.
+- 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza Keynote o PowerPoint por AppleScript: expones sin tocar nada.
+- ⏱️ **Cronómetro de ensayo** — al terminar te dice tiempo real, ritmo efectivo y, si pones una meta en minutos, la velocidad exacta que necesitas; calibración con un clic.
+- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con página de botones grandes (play/pausa, velocidad, saltos) y QR para escanear; protegido con token, solo en tu red.
+- 📄 **Exportar a PDF** — el guion marcado (guías, velocidades, pausas) listo para imprimir como respaldo.
+- 🔄 **Auto-actualización** — el aviso de versión nueva descarga, valida e instala solo (desactivable).
 - 🗄️ **Organización**: arrastra discursos a carpetas (o usa el menú contextual), colapsa carpetas, marca borradores, archiva.
 
 ### Atajos de teclado

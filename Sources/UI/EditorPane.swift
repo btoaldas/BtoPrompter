@@ -156,6 +156,12 @@ struct EditorPane: View {
             }
             .help("Duración objetivo: al terminar un ensayo te digo qué velocidad necesitas para cumplirla")
             Button {
+                exportPDF(doc)
+            } label: {
+                Image(systemName: "doc.richtext")
+            }
+            .help("Exportar el guion marcado a PDF (respaldo en papel)")
+            Button {
                 showAISheet = true
             } label: {
                 Label(model.aiEnabled ? "Ensayo IA" : "IA…", systemImage: "sparkles")
@@ -170,6 +176,20 @@ struct EditorPane: View {
             .tint(Theme.accent)
             .foregroundColor(.black)
             .disabled(doc.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private func exportPDF(_ doc: SpeechDoc) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = (doc.title.isEmpty ? "Discurso" : doc.title) + ".pdf"
+        panel.allowedContentTypes = [.pdf]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try PDFExporter.export(title: doc.title, body: doc.body,
+                                   guideTitles: model.guideTitles, to: url)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            store.importStatus = "Error al exportar PDF: \(error.localizedDescription)"
         }
     }
 

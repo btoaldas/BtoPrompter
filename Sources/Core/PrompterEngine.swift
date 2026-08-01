@@ -17,7 +17,18 @@ final class PrompterModel: ObservableObject {
         didSet { Settings.set(selectedID?.uuidString ?? "", .selectedID) }
     }
     @Published var chunks: [Chunk] = []
-    @Published var currentIndex: Int = 0
+    @Published var currentIndex: Int = 0 {
+        didSet {
+            // Cruce de marcas de diapositiva: solo hacia adelante.
+            guard mode == .prompting, currentIndex > oldValue else { return }
+            for chunk in chunks where chunk.isSlideMark {
+                let pos = chunk.range.lowerBound   // posición del siguiente texto leíble
+                if oldValue < pos && pos <= currentIndex {
+                    SlideSync.shared.advanceSlide()
+                }
+            }
+        }
+    }
     @Published var isPlaying: Bool = false
     @Published var wpm: Int {
         didSet { Settings.set(wpm, .wpm) }

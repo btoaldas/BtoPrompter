@@ -57,6 +57,11 @@ enum SelfTest {
         expect(VoiceMatcher.findPosition(heard: ["a"], script: script, current: 0) == nil,
                "palabra única corta no dispara")
 
+        // Marcas de diapositiva en guías.
+        let t7 = ScriptParser.parse("// Diapositiva 2\nTexto normal.\n// mirar al público", guideTitles: true)
+        expect(t7.first?.isSlideMark == true, "guía 'Diapositiva' detectada como marca")
+        expect(t7.last?.isSlideMark == false, "guía normal no es marca de diapositiva")
+
         print(failures.isEmpty ? "SELFTEST OK" : "SELFTEST FALLÓ: \(failures.count)")
         return failures.isEmpty
     }

@@ -36,6 +36,9 @@ struct SettingsSheet: View {
 
 struct GeneralSettingsTab: View {
     @EnvironmentObject var model: PrompterModel
+    @ObservedObject private var slideSync = SlideSync.shared
+
+    private var slideSyncStatus: String? { slideSync.status }
 
     var body: some View {
         Form {
@@ -78,6 +81,33 @@ struct GeneralSettingsTab: View {
                          ? "Cuenta regresiva: desactivada"
                          : "Cuenta regresiva: \(model.countdownSeconds) s antes de arrancar")
                 }
+            }
+            Section("Diapositivas automáticas") {
+                Toggle("Avanzar la presentación al cruzar una guía \"// Diapositiva N\"", isOn: .init(
+                    get: { SlideSync.shared.enabled },
+                    set: { SlideSync.shared.enabled = $0 }
+                ))
+                Picker("Aplicación", selection: .init(
+                    get: { SlideSync.shared.targetApp },
+                    set: { SlideSync.shared.targetApp = $0 }
+                )) {
+                    ForEach(SlideSync.targets, id: \.id) { t in
+                        Text(t.name).tag(t.id)
+                    }
+                }
+                HStack {
+                    Button("Probar avance ahora") {
+                        let wasEnabled = SlideSync.shared.enabled
+                        SlideSync.shared.enabled = true
+                        SlideSync.shared.advanceSlide()
+                        SlideSync.shared.enabled = wasEnabled
+                    }
+                    if let s = slideSyncStatus {
+                        Text(s).font(.system(size: 10)).foregroundColor(.red)
+                    }
+                }
+                Text("Requiere la presentación abierta en modo presentación y permiso de Automatización la primera vez. Solo avanza hacia adelante.")
+                    .font(.system(size: 10)).foregroundColor(.gray)
             }
             Section("Atajos") {
                 Text("Prompter:  ␣ play/pausa · ← → ±10 palabras · ⇧← ⇧→ ±1 palabra · 1–9 ir a sección · ↑ ↓ velocidad · + − letra · [ ] transparencia · M modo mini · R reiniciar · Esc editor")

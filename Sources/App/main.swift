@@ -17,6 +17,22 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.argu
     exit(0)
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--export-pdf"), CommandLine.arguments.count > i + 2 {
+    let input = CommandLine.arguments[i + 1]
+    let output = CommandLine.arguments[i + 2]
+    let body = (try? String(contentsOfFile: input, encoding: .utf8)) ?? ""
+    do {
+        try PDFExporter.export(title: URL(fileURLWithPath: input).deletingPathExtension().lastPathComponent,
+                               body: body, guideTitles: true,
+                               to: URL(fileURLWithPath: output))
+        print("PDF OK: \(output)")
+        exit(0)
+    } catch {
+        print("ERROR: \(error.localizedDescription)")
+        exit(1)
+    }
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--test-ai"), CommandLine.arguments.count > i + 1 {
     let text = (try? String(contentsOfFile: CommandLine.arguments[i + 1], encoding: .utf8)) ?? ""
     let provider = Settings.string(.aiProvider, default: "groq")

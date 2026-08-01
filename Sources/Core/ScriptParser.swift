@@ -19,6 +19,7 @@ struct Chunk: Identifiable {
     let style: ChunkStyle
     var isGuide: Bool = false   // se ve pero no se lee: el karaoke la salta
     var speedDelta: Int = 0     // ajuste de ppm para este tramo (marcas [v+N]/[v-N])
+    var isSlideMark: Bool = false  // guía tipo "Diapositiva N": puede avanzar la presentación
 }
 
 enum ScriptParser {
@@ -44,9 +45,13 @@ enum ScriptParser {
             guard !words.isEmpty else { return }
             // Las guías no aportan palabras leíbles: rango vacío, el karaoke las salta.
             let range = guide ? offset..<offset : offset..<(offset + words.count)
+            let lowered = sentence.lowercased()
+                .folding(options: .diacriticInsensitive, locale: Locale(identifier: "es"))
+            let slideMark = guide && (lowered.contains("diapositiva") || lowered.contains("slide"))
             result.append(Chunk(id: cid, words: words, range: range,
                                 isParagraphEnd: paragraphEnd, style: style, isGuide: guide,
-                                speedDelta: guide ? 0 : currentDelta))
+                                speedDelta: guide ? 0 : currentDelta,
+                                isSlideMark: slideMark))
             cid += 1
             if !guide { offset += words.count }
         }
