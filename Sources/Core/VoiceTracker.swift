@@ -41,6 +41,92 @@ final class VoiceTracker {
         }
     }
 
+    // MARK: Estado y prueba del micrófono
+
+    struct MicrophoneState {
+        let micAuthorized: Bool
+        let micDenied: Bool
+        let speechAuthorized: Bool
+        let speechDenied: Bool
+        let speechNeeded: Bool
+
+        var allGranted: Bool {
+            micAuthorized && (!speechNeeded || speechAuthorized)
+        }
+        var summary: String {
+            if allGranted { return "Permisos concedidos" }
+            if micDenied { return "Micrófono denegado" }
+            if speechNeeded && speechDenied { return "Reconocimiento de voz denegado" }
+            return "Permisos pendientes de conceder"
+        }
+    }
+
+    // Estado actual de los permisos, sin pedir nada ni abrir diálogos.
+    func microphoneState() -> MicrophoneState {
+        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+        let speech = SFSpeechRecognizer.authorizationStatus()
+        let needsSpeech = configuredPrimary.needsSpeechPermission
+            || VoiceProviderCatalog.configuredOrder(
+                primary: configuredPrimary,
+                rawFallbacks: Settings.string(.voiceFailoverOrder, default: ""),
+                failover: Settings.bool(.voiceFailoverEnabled, default: true)
+            ).contains(where: { $0.needsSpeechPermission })
+        return MicrophoneState(micAuthorized: mic == .authorized,
+                               micDenied: mic == .denied || mic == .restricted,
+                               speechAuthorized: speech == .authorized,
+                               speechDenied: speech == .denied || speech == .restricted,
+                               speechNeeded: needsSpeech)
+    }
+
+    // Prueba real: abre el micrófono un instante y mide si entra sonido.
+    // Sirve para confirmar que además del permiso hay captura de verdad.
+    func testMicrophone(_ completion: @escaping (Bool, String) -> Void) {
+        requestMicrophone(openSettingsOnDenial: false) { granted in
+            guard granted else {
+                completion(false, "Micrófono denegado. Actívalo en Ajustes del Sistema → Privacidad y seguridad → Micrófono.")
+                return
+            }
+            guard !self.running else {
+                completion(true, "Micrófono en uso por el seguimiento: está conectado.")
+                return
+            }
+            let engine = AVAudioEngine()
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                completion(false, "El micrófono no entregó un formato de audio válido.")
+                return
+            }
+            var peak: Float = 0
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                guard let data = buffer.floatChannelData?[0] else { return }
+                let n = Int(buffer.frameLength)
+                var localPeak: Float = 0
+                for i in 0..<n { localPeak = max(localPeak, abs(data[i])) }
+                peak = max(peak, localPeak)
+            }
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                input.removeTap(onBus: 0)
+                completion(false, "No se pudo abrir el micrófono: \(error.localizedDescription)")
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                input.removeTap(onBus: 0)
+                engine.stop()
+                let level = Int(min(1, peak * 3) * 100)
+                let device = AVCaptureDevice.default(for: .audio)?.localizedName ?? "micrófono del sistema"
+                if peak > 0.005 {
+                    completion(true, "✓ Micrófono conectado y captando (\(device), nivel \(level) %)")
+                } else {
+                    completion(true, "✓ Micrófono conectado (\(device)), pero no se oyó nada: habla y vuelve a probar.")
+                }
+            }
+        }
+    }
+
     func start() {
         guard !desired else { return }
         desired = true

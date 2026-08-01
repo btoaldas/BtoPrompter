@@ -143,6 +143,9 @@ struct VoiceSettingsTab: View {
     @State private var confirmJumps: Bool
     @State private var ttsVoiceIdentifier: String
     @State private var ttsRate: Double
+    @State private var micState: VoiceTracker.MicrophoneState?
+    @State private var micTestResult: String?
+    @State private var micTesting = false
 
     init() {
         let initialPrimary = VoiceProviderID(
@@ -192,7 +195,41 @@ struct VoiceSettingsTab: View {
                         .foregroundColor(model.voiceStatus != nil || model.voiceProviderState.isFailure
                                          ? .orange : .secondary)
                     Spacer()
-                    Button("Permisos…") { VoiceTracker.shared.requestPermissions { _ in } }
+                    Button("Permisos…") {
+                        VoiceTracker.shared.requestPermissions { _ in refreshMicState() }
+                    }
+                }
+                // Estado del micrófono visible desde el primer momento, sin
+                // tener que activar el seguimiento para descubrir si funciona.
+                HStack(spacing: 8) {
+                    Image(systemName: micState?.allGranted == true
+                          ? "checkmark.circle.fill"
+                          : (micState?.micDenied == true || micState?.speechDenied == true
+                             ? "exclamationmark.triangle.fill" : "questionmark.circle"))
+                        .foregroundColor(micState?.allGranted == true ? .green
+                                         : (micState?.micDenied == true ? .red : .orange))
+                    Text(micTestResult ?? micState?.summary ?? "Comprobando permisos…")
+                        .font(.system(size: 11))
+                        .foregroundColor(micTestResult?.hasPrefix("✓") == true ? .green
+                                         : (micState?.allGranted == true ? .secondary : .orange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button {
+                        micTesting = true
+                        micTestResult = nil
+                        VoiceTracker.shared.testMicrophone { ok, message in
+                            micTesting = false
+                            micTestResult = message
+                            refreshMicState()
+                        }
+                    } label: {
+                        if micTesting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Comprobar micrófono")
+                        }
+                    }
+                    .disabled(micTesting)
                 }
                 Text("El respaldo omite automáticamente proveedores sin autorización o sin API key. Nunca escucha con dos motores a la vez.")
                     .font(.system(size: 10)).foregroundColor(.secondary)
@@ -254,6 +291,7 @@ struct VoiceSettingsTab: View {
         .onAppear {
             normalizeFallback(for: primary)
             appleModels.refresh()
+            refreshMicState()
         }
         .onChange(of: primary) { value in
             Settings.set(value.rawValue, .voiceProvider)
@@ -279,6 +317,10 @@ struct VoiceSettingsTab: View {
         .onChange(of: confirmJumps) { Settings.set($0, .voiceConfirmLargeJumps) }
         .onChange(of: ttsVoiceIdentifier) { Settings.set($0, .ttsVoiceIdentifier) }
         .onChange(of: ttsRate) { Settings.set($0, .ttsRate) }
+    }
+
+    private func refreshMicState() {
+        micState = VoiceTracker.shared.microphoneState()
     }
 
     private func normalizeFallback(for provider: VoiceProviderID) {
