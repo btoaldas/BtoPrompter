@@ -25,6 +25,8 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>BtoPrompter transcribe archivos de audio para convertirlos en discursos de texto.</string>
+	<string>BtoPrompter transcribe archivos de audio y puede seguir tu lectura en vivo para avanzar el guion.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>BtoPrompter escucha tu voz (solo en este equipo) para avanzar el guion mientras hablas.</string>
 </dict>
 </plist>

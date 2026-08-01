@@ -42,6 +42,21 @@ enum SelfTest {
         expect((t6.first?.speedDelta ?? 0) <= Settings.Limits.speedDeltaRange.upperBound,
                "delta fuera de rango se recorta")
 
+        // Seguimiento por voz: normalizador y matcher.
+        expect(VoiceMatcher.normalize("¡Tecnológica!") == "tecnologica", "normaliza tildes y signos")
+        let script = "buenas tardes a todos hoy quiero presentarles el avance del proyecto"
+            .split(separator: " ").map(String.init)
+        expect(VoiceMatcher.findPosition(heard: ["Buenas", "tardes,", "a"], script: script, current: 0) == 2,
+               "match de 3 palabras al inicio")
+        expect(VoiceMatcher.findPosition(heard: ["blabla", "el", "avance"], script: script, current: 2) == 8,
+               "salto adelante dentro de la ventana")
+        expect(VoiceMatcher.findPosition(heard: ["improvisando", "cosas", "raras"], script: script, current: 3) == nil,
+               "sin match espera (improvisación)")
+        expect(VoiceMatcher.findPosition(heard: ["presentarles"], script: script, current: 4) == 6,
+               "palabra única distintiva")
+        expect(VoiceMatcher.findPosition(heard: ["a"], script: script, current: 0) == nil,
+               "palabra única corta no dispara")
+
         print(failures.isEmpty ? "SELFTEST OK" : "SELFTEST FALLÓ: \(failures.count)")
         return failures.isEmpty
     }

@@ -63,6 +63,11 @@ struct MiniPrompterView: View {
                             model.changeFont(+Settings.Limits.fontStep)
                         }
                     }
+                    ControlButton(symbol: model.voiceActive ? "mic.fill" : "mic.slash.fill",
+                                  help: "Seguirme por voz", size: 12,
+                                  color: model.voiceActive ? Theme.spyOn : .gray) {
+                        model.voiceFollow.toggle()
+                    }
                     ControlButton(symbol: model.spyMode ? "eye.slash.fill" : "eye.fill",
                                   help: "Invisible/visible al compartir pantalla", size: 12,
                                   color: model.spyMode ? Theme.spyOn : Theme.spyOff) {

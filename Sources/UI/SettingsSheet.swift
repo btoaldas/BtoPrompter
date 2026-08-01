@@ -69,6 +69,7 @@ struct GeneralSettingsTab: View {
                 Toggle("Recordar el modo minimalista entre sesiones", isOn: $model.miniMode)
                 Toggle("Reproducir automáticamente al entrar al prompter", isOn: $model.autoPlay)
                 Toggle("Mantener la pantalla despierta durante el prompter", isOn: $model.keepAwake)
+                Toggle("Seguirme por voz: avanzar escuchándome (local, pide micrófono)", isOn: $model.voiceFollow)
                 Stepper(value: $model.countdownSeconds, in: 0...10) {
                     Text(model.countdownSeconds == 0
                          ? "Cuenta regresiva: desactivada"

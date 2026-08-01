@@ -72,6 +72,24 @@ final class PrompterModel: ObservableObject {
     }
     private var sleepAssertion: IOPMAssertionID = 0
 
+    // Seguimiento por voz: el prompter avanza escuchando al orador.
+    @Published var voiceFollow: Bool {
+        didSet {
+            Settings.set(voiceFollow, .voiceFollow)
+            guard mode == .prompting, isPlaying else { return }
+            if voiceFollow {
+                pendingWork?.cancel()
+                VoiceTracker.shared.start()
+            } else {
+                VoiceTracker.shared.stop()
+                scheduleNext()
+            }
+        }
+    }
+    @Published var voiceActive: Bool = false
+    @Published var voiceStatus: String? = nil
+    private(set) var scriptNorm: [String] = []
+
     // Ensayo con IA (parametrizable, apagado por defecto).
     @Published var aiEnabled: Bool {
         didSet { Settings.set(aiEnabled, .aiEnabled) }
@@ -111,6 +129,7 @@ final class PrompterModel: ObservableObject {
         autoPlay = Settings.bool(.autoPlay, default: false)
         keepAwake = Settings.bool(.keepAwake, default: true)
         accentColorID = Settings.string(.accentColorID, default: "amarillo")
+        voiceFollow = Settings.bool(.voiceFollow, default: false)
         aiEnabled = Settings.bool(.aiEnabled, default: false)
         aiProvider = Settings.string(.aiProvider, default: "groq")
         aiModel = Settings.string(.aiModel, default: "llama-3.3-70b-versatile")
@@ -149,6 +168,14 @@ final class PrompterModel: ObservableObject {
         guard let doc = SpeechStore.shared.speech(selectedID) else { return }
         chunks = ScriptParser.parse(doc.body, guideTitles: guideTitles)
         guard totalWords > 0 else { return }
+        // Guion normalizado por índice global, para el seguimiento por voz.
+        var norm = [String](repeating: "", count: totalWords)
+        for chunk in chunks where !chunk.isGuide {
+            for (i, w) in chunk.words.enumerated() {
+                norm[chunk.range.lowerBound + i] = VoiceMatcher.normalize(w)
+            }
+        }
+        scriptNorm = norm
         currentIndex = 0
         isPlaying = false
         mode = .prompting
@@ -203,7 +230,15 @@ final class PrompterModel: ObservableObject {
             countdown = countdownSeconds
             tickCountdown()
         } else {
-            isPlaying = true
+            startPlayback()
+        }
+    }
+
+    private func startPlayback() {
+        isPlaying = true
+        if voiceFollow {
+            VoiceTracker.shared.start()
+        } else {
             scheduleNext()
         }
     }
@@ -212,8 +247,7 @@ final class PrompterModel: ObservableObject {
         guard let current = countdown else { return }
         if current <= 0 {
             countdown = nil
-            isPlaying = true
-            scheduleNext()
+            startPlayback()
             return
         }
         let work = DispatchWorkItem { [weak self] in
@@ -232,6 +266,7 @@ final class PrompterModel: ObservableObject {
         countdownWork?.cancel()
         countdownWork = nil
         countdown = nil
+        VoiceTracker.shared.stop()
     }
 
     func togglePlay() {
@@ -284,8 +319,21 @@ final class PrompterModel: ObservableObject {
         scheduleNext()
     }
 
+    // Palabras oídas por el micrófono (transcripción parcial acumulada).
+    func voiceHeard(_ words: [String]) {
+        guard isPlaying, voiceFollow, mode == .prompting else { return }
+        guard let p = VoiceMatcher.findPosition(heard: words, script: scriptNorm,
+                                                current: currentIndex) else { return }
+        let next = min(p + 1, totalWords - 1)
+        // Solo hacia adelante: evita rebotes con transcripciones parciales.
+        if next > currentIndex {
+            currentIndex = next
+            if next >= totalWords - 1 { pause() }
+        }
+    }
+
     private func scheduleNext() {
-        guard isPlaying, currentIndex < totalWords - 1 else {
+        guard isPlaying, !voiceFollow, currentIndex < totalWords - 1 else {
             if currentIndex >= totalWords - 1 { isPlaying = false }
             return
         }

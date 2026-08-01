@@ -19,6 +19,18 @@ struct PrompterView: View {
             if let n = model.countdown {
                 CountdownOverlay(number: n, compact: model.miniMode)
             }
+            if let status = model.voiceStatus {
+                VStack {
+                    Spacer()
+                    Text(status)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.red.opacity(0.85))
+                        .cornerRadius(6)
+                        .padding(.bottom, model.miniMode ? 4 : 52)
+                }
+            }
         }
     }
 
@@ -134,6 +146,11 @@ struct PrompterView: View {
             ControlButton(symbol: "stop.fill", help: "Volver al editor (Esc)") { model.backToEditor() }
             ControlButton(symbol: "menubar.dock.rectangle", help: "Modo minimalista: barra de 2 líneas arriba de la pantalla (M)") {
                 model.toggleMiniMode()
+            }
+            ControlButton(symbol: model.voiceActive ? "mic.fill" : "mic.slash.fill",
+                          help: "Seguirme por voz: el prompter avanza escuchándote (local, sin internet)",
+                          color: model.voiceActive ? Theme.spyOn : .gray) {
+                model.voiceFollow.toggle()
             }
             Divider().frame(height: 18)
             HStack(spacing: 4) {

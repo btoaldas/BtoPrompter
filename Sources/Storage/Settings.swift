@@ -9,7 +9,7 @@ enum Settings {
     enum Key: String {
         case wpm, fontSize, bgOpacity, spyMode, guideTitles, selectedID
         case miniMode, miniFontSize
-        case countdownSeconds, autoPlay, keepAwake, accentColorID
+        case countdownSeconds, autoPlay, keepAwake, accentColorID, voiceFollow
         case aiEnabled, aiProvider, aiModel, aiBaseURL, aiStyle, aiCustomPrompt
         // Claves históricas de la v1.0 (migradas a la biblioteca).
         case legacyScript = "script"
