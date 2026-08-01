@@ -19,6 +19,9 @@ struct PrompterView: View {
             if let n = model.countdown {
                 CountdownOverlay(number: n, compact: model.miniMode)
             }
+            if let r = model.rehearsalResult {
+                RehearsalResultOverlay(result: r)
+            }
             if let status = model.voiceStatus {
                 VStack {
                     Spacer()

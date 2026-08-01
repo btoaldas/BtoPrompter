@@ -138,6 +138,23 @@ struct EditorPane: View {
                 Button("+") { model.changeSpeed(+Settings.Limits.wpmStep) }
             }
             .help("Velocidad en palabras por minuto")
+            HStack(spacing: 4) {
+                Text("Meta").font(.system(size: 11)).foregroundColor(.gray)
+                TextField("min", text: .init(
+                    get: {
+                        guard let t = doc.targetMinutes else { return "" }
+                        return t == t.rounded() ? String(Int(t)) : String(format: "%.1f", t)
+                    },
+                    set: { v in
+                        let parsed = Double(v.replacingOccurrences(of: ",", with: "."))
+                        store.update(doc.id) { $0.targetMinutes = parsed }
+                    }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 44)
+                Text("min").font(.system(size: 11)).foregroundColor(.gray)
+            }
+            .help("Duración objetivo: al terminar un ensayo te digo qué velocidad necesitas para cumplirla")
             Button {
                 showAISheet = true
             } label: {

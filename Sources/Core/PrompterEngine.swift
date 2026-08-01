@@ -90,6 +90,25 @@ final class PrompterModel: ObservableObject {
     @Published var voiceStatus: String? = nil
     private(set) var scriptNorm: [String] = []
 
+    // Cronómetro de ensayo: tiempo efectivo de lectura y resultado al terminar.
+    struct RehearsalResult {
+        let seconds: Double
+        let words: Int
+        let effectiveWpm: Int
+        let targetMinutes: Double?
+        var suggestedWpm: Int? {
+            guard let t = targetMinutes, t > 0 else { return nil }
+            return max(60, min(400, Int((Double(words) / t).rounded())))
+        }
+    }
+    @Published var rehearsalStats: Bool {
+        didSet { Settings.set(rehearsalStats, .rehearsalStats) }
+    }
+    @Published var rehearsalResult: RehearsalResult? = nil
+    private var playedSeconds: Double = 0
+    private var playStartedAt: Date? = nil
+    private var wordsAtStart: Int = 0
+
     // Ensayo con IA (parametrizable, apagado por defecto).
     @Published var aiEnabled: Bool {
         didSet { Settings.set(aiEnabled, .aiEnabled) }
@@ -130,6 +149,7 @@ final class PrompterModel: ObservableObject {
         keepAwake = Settings.bool(.keepAwake, default: true)
         accentColorID = Settings.string(.accentColorID, default: "amarillo")
         voiceFollow = Settings.bool(.voiceFollow, default: false)
+        rehearsalStats = Settings.bool(.rehearsalStats, default: true)
         aiEnabled = Settings.bool(.aiEnabled, default: false)
         aiProvider = Settings.string(.aiProvider, default: "groq")
         aiModel = Settings.string(.aiModel, default: "llama-3.3-70b-versatile")
@@ -178,6 +198,9 @@ final class PrompterModel: ObservableObject {
         scriptNorm = norm
         currentIndex = 0
         isPlaying = false
+        playedSeconds = 0
+        playStartedAt = nil
+        rehearsalResult = nil
         mode = .prompting
         NSApp.keyWindow?.makeFirstResponder(nil)
         GlobalHotKeys.shared.register()
@@ -236,11 +259,31 @@ final class PrompterModel: ObservableObject {
 
     private func startPlayback() {
         isPlaying = true
+        playStartedAt = Date()
         if voiceFollow {
             VoiceTracker.shared.start()
         } else {
             scheduleNext()
         }
+    }
+
+    private func accumulatePlayedTime() {
+        if let s = playStartedAt {
+            playedSeconds += Date().timeIntervalSince(s)
+            playStartedAt = nil
+        }
+    }
+
+    private func maybeFinishRehearsal() {
+        guard rehearsalStats, mode == .prompting,
+              currentIndex >= totalWords - 1, playedSeconds > 3 else { return }
+        let doc = SpeechStore.shared.speech(selectedID)
+        rehearsalResult = RehearsalResult(
+            seconds: playedSeconds,
+            words: totalWords,
+            effectiveWpm: max(1, Int((Double(totalWords) / (playedSeconds / 60.0)).rounded())),
+            targetMinutes: doc?.targetMinutes
+        )
     }
 
     private func tickCountdown() {
@@ -260,6 +303,7 @@ final class PrompterModel: ObservableObject {
     }
 
     func pause() {
+        accumulatePlayedTime()
         isPlaying = false
         pendingWork?.cancel()
         pendingWork = nil
@@ -267,6 +311,7 @@ final class PrompterModel: ObservableObject {
         countdownWork = nil
         countdown = nil
         VoiceTracker.shared.stop()
+        maybeFinishRehearsal()
     }
 
     func togglePlay() {
@@ -276,6 +321,9 @@ final class PrompterModel: ObservableObject {
     func reset() {
         pause()
         currentIndex = 0
+        playedSeconds = 0
+        playStartedAt = nil
+        rehearsalResult = nil
     }
 
     func skip(_ delta: Int) {
@@ -334,7 +382,11 @@ final class PrompterModel: ObservableObject {
 
     private func scheduleNext() {
         guard isPlaying, !voiceFollow, currentIndex < totalWords - 1 else {
-            if currentIndex >= totalWords - 1 { isPlaying = false }
+            if currentIndex >= totalWords - 1 {
+                accumulatePlayedTime()
+                isPlaying = false
+                maybeFinishRehearsal()
+            }
             return
         }
         let limits = Settings.Limits.self

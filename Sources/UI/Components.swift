@@ -39,6 +39,50 @@ struct CountdownOverlay: View {
     }
 }
 
+// Resultado del cronómetro de ensayo al terminar el guion.
+struct RehearsalResultOverlay: View {
+    @EnvironmentObject var model: PrompterModel
+    let result: PrompterModel.RehearsalResult
+
+    private var timeText: String {
+        let s = Int(result.seconds.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("🏁 Fin del ensayo")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+            Text("Leíste \(result.words) palabras en \(timeText) — ritmo real \(result.effectiveWpm) ppm")
+                .font(.system(size: 13))
+            if let target = result.targetMinutes, let suggested = result.suggestedWpm {
+                Text(String(format: "Meta: %.1f min → necesitas %d ppm", target, suggested))
+                    .font(.system(size: 12))
+                    .foregroundColor(.orange)
+            }
+            HStack(spacing: 10) {
+                Button("Calibrar a mi ritmo (\(result.effectiveWpm) ppm)") {
+                    model.wpm = min(max(60, result.effectiveWpm), 400)
+                    model.rehearsalResult = nil
+                }
+                if let suggested = result.suggestedWpm {
+                    Button("Usar ritmo de la meta (\(suggested) ppm)") {
+                        model.wpm = suggested
+                        model.rehearsalResult = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                Button("Cerrar") { model.rehearsalResult = nil }
+            }
+        }
+        .padding(20)
+        .background(Color.black.opacity(0.92))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.accent.opacity(0.5)))
+        .shadow(radius: 16)
+    }
+}
+
 struct SpyToggle: View {
     @EnvironmentObject var model: PrompterModel
 

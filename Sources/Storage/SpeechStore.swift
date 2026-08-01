@@ -13,6 +13,7 @@ struct SpeechDoc: Codable, Identifiable, Equatable {
     var isArchived: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    var targetMinutes: Double? = nil // meta de duración para el cronómetro de ensayo
 }
 
 struct Library: Codable {
