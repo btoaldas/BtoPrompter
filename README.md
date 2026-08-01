@@ -26,11 +26,14 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
 - ⚙️ **Configuración central** (engranaje o `⌘,`): General, Voz, Diagnóstico, Ensayo IA, Remoto y actualizaciones.
 - ⏱️ **Cuenta regresiva y autoplay** — 3-2-1 configurable (0–10 s) antes de arrancar, y opción de reproducir automáticamente al entrar al prompter.
-- 🗣️ **Seguimiento por voz (opcional)** — Apple local o nube, ElevenLabs, Deepgram, Mistral Voxtral, Soniox, AssemblyAI, Speechmatics y Gladia. Proveedor principal y primer respaldo configurables; el failover nunca mantiene dos motores activos a la vez.
+- 🗣️ **Seguimiento por voz (opcional)** — Apple local o nube, ElevenLabs, Deepgram, Mistral Voxtral, Soniox, AssemblyAI, Speechmatics y Gladia. Cada proveedor con **su API key, su modelo y su autorización por separado**, con prueba de clave incluida. Proveedor principal y respaldo configurables; si la voz falla, el guion sigue avanzando por tiempo en vez de quedarse congelado.
+- 📥 **Modelos locales descargables** — catálogo Whisper (base a large v3 turbo) con descarga que se puede cancelar y **continuar donde quedó**, incluso tras cerrar la app.
 - 🧭 **Alineación conservadora** — jamás retrocede por sí sola, ignora parciales duplicados y, ante frases repetidas o saltos grandes, espera contexto adicional antes de mover el guion.
-- 🧰 **Diagnóstico local controlado** — logs rotados, eventos de reproducción/alineación y grabación opcional solo de voz. Retención y espacio máximo configurables; claves y tokens se ocultan.
-- 🧠 **Perfil local del orador (opcional)** — aprende ritmo, longitud de frase y conectores a partir de ensayos. Compartir ese resumen con Ensayo IA requiere un segundo permiso explícito.
-- 🔊 **Lectura TTS local** — escucha el discurso con las voces instaladas en macOS, elige voz y ritmo, sin enviar el texto a internet.
+- 🧰 **Diagnóstico local controlado** — logs rotados, eventos y grabación opcional solo de voz, con **cada palabra alineada al segundo exacto de la grabación**. Retención y espacio máximo configurables; claves y tokens se ocultan.
+- 📈 **Análisis de tus ensayos** — informe con tu ritmo real, tus pausas más largas (y la palabra que las precede), tramos rápidos y lentos, correcciones y cuánto avanzaste hablando.
+- 🧠 **Perfil local del orador (opcional)** — aprende ritmo, longitud de frase, conectores y muletillas de tus ensayos. Compartir ese resumen con Ensayo IA requiere un segundo permiso explícito.
+- 🎨 **Estilos de ensayo propios** — crea, nombra, edita y elimina tus estilos, o **genera uno desde tus ensayos medidos**: con tus datos locales o redactado por la IA a partir de ellos.
+- 🔊 **Lectura en voz alta multi-proveedor** — voces de macOS, **voces locales propias** (modelos Piper `.onnx` que instalas tú) o ElevenLabs, OpenAI, Gemini y Deepgram Aura, eligiendo modelo y voz. Lo local no envía nada a internet.
 - 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza Keynote o PowerPoint por AppleScript: expones sin tocar nada.
 - ⏱️ **Cronómetro de ensayo** — al terminar te dice tiempo real, ritmo efectivo y, si pones una meta en minutos, la velocidad exacta que necesitas; calibración con un clic.
 - 📱 **Control remoto desde el teléfono (opcional)** — servidor local con página de botones grandes (play/pausa, velocidad, saltos) y QR para escanear; protegido con token, solo en tu red.
@@ -110,6 +113,13 @@ La key se guarda en un archivo local con permisos privados (`0600`); nunca se in
 - Haz siempre una grabación de prueba de 30 segundos antes del evento real.
 
 Flags de desarrollo: `--capturable` (arranca visible en capturas, útil para probar) y `--autostart` (entra directo al prompter reproduciendo).
+
+## Privacidad
+
+- Todo funciona en tu Mac por defecto: seguimiento con Apple local, lectura con voces del sistema o locales, diagnóstico y perfil del orador.
+- **Nada sale del equipo sin que lo autorices**, y la autorización es **por proveedor**, no un interruptor general.
+- Las API keys se guardan en un archivo propio con permisos `0600`, nunca en las preferencias ni en los registros.
+- Las grabaciones y transcripciones son locales, con límites de días y de espacio, y se pueden borrar desde la app.
 
 ## Contribuir
 
