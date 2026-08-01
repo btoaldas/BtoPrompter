@@ -24,7 +24,8 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 📏 **Modo minimalista** — barra delgada pegada arriba de la pantalla (debajo del notch), todo el ancho, karaoke en máximo 2 líneas con controles esenciales a los costados. Tecla `M` para entrar y salir; el alto se adapta al tamaño de letra.
 - 🔠 **Tamaño de letra ajustable** en vivo.
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
-- ⚙️ **Configuración central** (engranaje o `⌘,`): General, Voz, Diagnóstico, Ensayo IA, Remoto y actualizaciones.
+- ⚙️ **Configuración central** (engranaje o `⌘,`): General, Voz, Lectura, Diagnóstico, Ensayo IA, Remoto y actualizaciones. También accesible **durante la presentación**, sin parar ni volver al editor.
+- 🎤 **Comprobación real del micrófono** — la pestaña Voz muestra el estado de los permisos nada más abrirla y el botón «Comprobar micrófono» abre la entrada de audio, mide el sonido que entra y responde con el nombre del micrófono y el nivel captado.
 - ⏱️ **Cuenta regresiva y autoplay** — 3-2-1 configurable (0–10 s) antes de arrancar, y opción de reproducir automáticamente al entrar al prompter.
 - 🗣️ **Seguimiento por voz (opcional)** — Apple local o nube, ElevenLabs, Deepgram, Mistral Voxtral, Soniox, AssemblyAI, Speechmatics y Gladia. Cada proveedor con **su API key, su modelo y su autorización por separado**, con prueba de clave incluida. Proveedor principal y respaldo configurables; si la voz falla, el guion sigue avanzando por tiempo en vez de quedarse congelado.
 - 📥 **Modelos locales descargables** — catálogo Whisper (base a large v3 turbo) con descarga que se puede cancelar y **continuar donde quedó**, incluso tras cerrar la app.
@@ -36,7 +37,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🔊 **Lectura en voz alta multi-proveedor** — voces de macOS, **voces locales propias** (modelos Piper `.onnx` que instalas tú) o ElevenLabs, OpenAI, Gemini y Deepgram Aura, eligiendo modelo y voz. Lo local no envía nada a internet.
 - 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza la presentación: Keynote y PowerPoint por AppleScript, o **cualquier app** enviando la flecha derecha (Vista Previa, PDF, navegador).
 - ⏱️ **Cronómetro de ensayo** — al terminar te dice tiempo real, ritmo efectivo y, si pones una meta en minutos, la velocidad exacta que necesitas; calibración con un clic.
-- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con QR para escanear y dos pestañas: **Teleprompter** (play/pausa, velocidad, saltos) y **Ordenador** (flechas, avance y retroceso de página, clics, trackpad virtual y teclado). Sirve para pasar diapositivas en Keynote, PowerPoint, Vista Previa, un PDF o el navegador, porque envía teclas reales del sistema. Protegido con token, solo en tu red, y el control del ordenador exige un permiso aparte.
+- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con QR y dos pestañas. **Teleprompter**: iniciar, traer al frente, play/pausa, velocidad, saltos, micrófono con estado en vivo, modo minimalista, transparencia, minimizar y encuadrar. **Ordenador**: flechas, avance y retroceso de página, clics, trackpad virtual y teclado — pasa diapositivas en Keynote, PowerPoint, Vista Previa, un PDF o el navegador, porque envía teclas reales del sistema. Protegido con token, solo en tu red, y el control del ordenador exige un permiso aparte.
 - 📄 **Exportar a PDF** — el guion marcado (guías, velocidades, pausas) listo para imprimir como respaldo.
 - 🔄 **Auto-actualización** — el aviso de versión nueva descarga, valida e instala solo (desactivable).
 - 🗄️ **Organización**: arrastra discursos a carpetas (o usa el menú contextual), colapsa carpetas, marca borradores, archiva.
@@ -78,7 +79,9 @@ cd BtoPrompter
 open dist/BtoPrompter.app
 ```
 
-`build.sh` compila con `swiftc -O` y firma ad-hoc. Si quieres moverla, copia `dist/BtoPrompter.app` a `/Applications`.
+`build.sh` compila con `swiftc -O` y firma la app. Si quieres moverla, copia `dist/BtoPrompter.app` a `/Applications`.
+
+**Permisos que sobreviven a las actualizaciones.** Con firma ad-hoc, macOS ata los permisos (micrófono, Accesibilidad) al hash exacto del binario, así que cada recompilación los invalida aunque sigan marcados en Ajustes. Para evitarlo, crea una vez un certificado local de firma llamado `BtoPrompter Local Signing` en tu llavero: `build.sh` lo detecta solo y lo usa, y entonces el permiso se concede una sola vez. Sin certificado se firma ad-hoc, como antes. Puedes indicar otro nombre con `BTOPROMPTER_SIGN_ID`.
 
 ## Uso
 
