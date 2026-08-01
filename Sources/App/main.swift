@@ -19,6 +19,33 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.argu
     exit(0)
 }
 
+// Prueba de un motor TTS: genera audio y lo guarda, sin abrir la interfaz.
+if let i = CommandLine.arguments.firstIndex(of: "--test-tts"), CommandLine.arguments.count > i + 2 {
+    let providerID = CommandLine.arguments[i + 1]
+    let outPath = CommandLine.arguments[i + 2]
+    guard let provider = TTSProviderID(rawValue: providerID) else {
+        print("ERROR: proveedor desconocido. Opciones: " +
+              TTSProviderID.allCases.map(\.rawValue).joined(separator: ", "))
+        exit(1)
+    }
+    let text = CommandLine.arguments.count > i + 3
+        ? CommandLine.arguments[i + 3]
+        : "Hola, esta es una prueba de la voz de BtoPrompter."
+    let sem = DispatchSemaphore(value: 0)
+    TTSEngines.synthesize(text: text, provider: provider) { result in
+        switch result {
+        case .success(let data):
+            try? data.write(to: URL(fileURLWithPath: outPath))
+            print("OK \(provider.name): \(data.count) bytes → \(outPath)")
+        case .failure(let error):
+            print("ERROR \(provider.name): \(error.localizedDescription)")
+        }
+        sem.signal()
+    }
+    sem.wait()
+    exit(0)
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--export-pdf"), CommandLine.arguments.count > i + 2 {
     let input = CommandLine.arguments[i + 1]
     let output = CommandLine.arguments[i + 2]

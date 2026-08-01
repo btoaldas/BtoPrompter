@@ -16,6 +16,8 @@ struct SettingsSheet: View {
                     .tabItem { Label("General", systemImage: "gearshape") }
                 VoiceSettingsTab()
                     .tabItem { Label("Voz", systemImage: "waveform.and.mic") }
+                TTSSettingsView()
+                    .tabItem { Label("Lectura", systemImage: "speaker.wave.2") }
                 DiagnosticsSettingsTab()
                     .tabItem { Label("Diagnóstico", systemImage: "stethoscope") }
                 ScrollView {
@@ -232,25 +234,6 @@ struct VoiceSettingsTab: View {
                 ForEach(VoiceProviderID.allCases.filter { $0.secretName != nil }) { provider in
                     ExternalProviderCard(provider: provider)
                 }
-            }
-
-            Section("Lectura en voz alta (TTS local)") {
-                Picker("Voz", selection: $ttsVoiceIdentifier) {
-                    Text("Automática según el idioma").tag("")
-                    ForEach(SpeechPlayback.availableVoices, id: \.identifier) { voice in
-                        Text("\(voice.name) — \(voice.language)").tag(voice.identifier)
-                    }
-                }
-                HStack {
-                    Text("Ritmo")
-                    Slider(value: $ttsRate, in: 0.30...0.68, step: 0.01)
-                    Button(speechPlayback.speaking ? "Detener" : "Probar") {
-                        if speechPlayback.speaking { speechPlayback.stop() }
-                        else { speechPlayback.speak("Hola. Esta es la voz de lectura de BtoPrompter.") }
-                    }
-                }
-                Text("Usa voces instaladas en macOS y no envía el discurso a internet. En el editor, el botón de altavoz lee o detiene el discurso completo.")
-                    .font(.system(size: 10)).foregroundColor(.secondary)
             }
 
             Section("Seguridad de alineación") {

@@ -17,6 +17,7 @@ enum Settings {
         case diagnosticsMaxMegabytes, diagnosticsIncludeScript
         case speechProfileEnabled, speechProfileMinimumSessions, speechProfileShareWithAI
         case ttsVoiceIdentifier, ttsRate
+        case ttsProvider, ttsCloudConsent, ttsLocalVoiceID, ttsPiperPath
         case rehearsalStats, autoInstallUpdates
         case remoteEnabled, remotePort, remoteToken
         case slideSyncEnabled, slideSyncApp
