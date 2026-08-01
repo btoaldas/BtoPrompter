@@ -62,6 +62,12 @@ struct GeneralSettingsTab: View {
                 Toggle("Invisible al compartir pantalla (modo espía)", isOn: $model.spyMode)
                 Toggle("Los títulos (#, ##) son guías que no se leen", isOn: $model.guideTitles)
                 Toggle("Recordar el modo minimalista entre sesiones", isOn: $model.miniMode)
+                Toggle("Reproducir automáticamente al entrar al prompter", isOn: $model.autoPlay)
+                Stepper(value: $model.countdownSeconds, in: 0...10) {
+                    Text(model.countdownSeconds == 0
+                         ? "Cuenta regresiva: desactivada"
+                         : "Cuenta regresiva: \(model.countdownSeconds) s antes de arrancar")
+                }
             }
             Section("Atajos") {
                 Text("Prompter:  ␣ play/pausa · ← → ±10 palabras · ↑ ↓ velocidad · + − letra · [ ] transparencia · M modo mini · R reiniciar · Esc editor")

@@ -25,6 +25,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🔠 **Tamaño de letra ajustable** en vivo.
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
 - ⚙️ **Configuración central** (engranaje o `⌘,`): velocidad, letras, transparencia, comportamiento, proveedor de IA y comprobación de actualizaciones contra GitHub Releases.
+- ⏱️ **Cuenta regresiva y autoplay** — 3-2-1 configurable (0–10 s) antes de arrancar, y opción de reproducir automáticamente al entrar al prompter.
 - 🗄️ **Organización**: arrastra discursos a carpetas (o usa el menú contextual), colapsa carpetas, marca borradores, archiva.
 
 ### Atajos de teclado
@@ -33,6 +34,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 |-------|--------|
 | `␣` espacio | Play / pausa |
 | `←` `→` | Saltar ±10 palabras |
+| `⇧←` `⇧→` | Saltar ±1 palabra (fino) |
 | `↑` `↓` | Velocidad ±10 ppm |
 | `+` `−` | Tamaño de letra |
 | `[` `]` | Transparencia del fondo |

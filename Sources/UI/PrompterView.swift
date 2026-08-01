@@ -6,13 +6,18 @@ struct PrompterView: View {
     @EnvironmentObject var model: PrompterModel
 
     var body: some View {
-        if model.miniMode {
-            MiniPrompterView()
-        } else {
-            VStack(spacing: 0) {
-                header
-                scroller
-                controls
+        ZStack {
+            if model.miniMode {
+                MiniPrompterView()
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    scroller
+                    controls
+                }
+            }
+            if let n = model.countdown {
+                CountdownOverlay(number: n, compact: model.miniMode)
             }
         }
     }
@@ -119,10 +124,12 @@ struct PrompterView: View {
         HStack(spacing: 16) {
             ControlButton(symbol: "gobackward", help: "Reiniciar (R)") { model.reset() }
             ControlButton(symbol: "backward.fill", help: "Atrás 10 palabras (←)") { model.skip(-10) }
-            ControlButton(symbol: model.isPlaying ? "pause.fill" : "play.fill",
+            ControlButton(symbol: "backward.frame.fill", help: "Atrás 1 palabra (⇧←)", size: 13) { model.skip(-1) }
+            ControlButton(symbol: model.isPlaying || model.countdown != nil ? "pause.fill" : "play.fill",
                           help: "Play / Pausa (espacio)", size: 22, color: Theme.accent) {
                 model.togglePlay()
             }
+            ControlButton(symbol: "forward.frame.fill", help: "Adelante 1 palabra (⇧→)", size: 13) { model.skip(+1) }
             ControlButton(symbol: "forward.fill", help: "Adelante 10 palabras (→)") { model.skip(+10) }
             ControlButton(symbol: "stop.fill", help: "Volver al editor (Esc)") { model.backToEditor() }
             ControlButton(symbol: "menubar.dock.rectangle", help: "Modo minimalista: barra de 2 líneas arriba de la pantalla (M)") {

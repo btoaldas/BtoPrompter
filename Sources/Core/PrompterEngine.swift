@@ -46,6 +46,18 @@ final class PrompterModel: ObservableObject {
     // aplicar el layout (evita medir geometría desde la vista, con sus races).
     @Published var miniContentWidth: CGFloat = 0
 
+    // Cuenta regresiva antes de reproducir (0 = arrancar de inmediato).
+    @Published var countdownSeconds: Int {
+        didSet { Settings.set(countdownSeconds, .countdownSeconds) }
+    }
+    // Reproducir automáticamente al entrar al prompter.
+    @Published var autoPlay: Bool {
+        didSet { Settings.set(autoPlay, .autoPlay) }
+    }
+    // Segundos restantes de la cuenta regresiva en curso (nil = sin conteo).
+    @Published var countdown: Int? = nil
+    private var countdownWork: DispatchWorkItem?
+
     // Ensayo con IA (parametrizable, apagado por defecto).
     @Published var aiEnabled: Bool {
         didSet { Settings.set(aiEnabled, .aiEnabled) }
@@ -81,6 +93,8 @@ final class PrompterModel: ObservableObject {
         guideTitles = Settings.bool(.guideTitles, default: true)
         miniMode = Settings.bool(.miniMode, default: false)
         miniFontSize = CGFloat(Settings.double(.miniFontSize, default: 20))
+        countdownSeconds = Settings.int(.countdownSeconds, default: 3)
+        autoPlay = Settings.bool(.autoPlay, default: false)
         aiEnabled = Settings.bool(.aiEnabled, default: false)
         aiProvider = Settings.string(.aiProvider, default: "groq")
         aiModel = Settings.string(.aiModel, default: "llama-3.3-70b-versatile")
@@ -124,6 +138,7 @@ final class PrompterModel: ObservableObject {
         mode = .prompting
         NSApp.keyWindow?.makeFirstResponder(nil)
         GlobalHotKeys.shared.register()
+        if autoPlay { play() }
     }
 
     func backToEditor() {
@@ -133,19 +148,46 @@ final class PrompterModel: ObservableObject {
     }
 
     func play() {
-        guard mode == .prompting, totalWords > 0 else { return }
+        guard mode == .prompting, totalWords > 0, countdown == nil else { return }
         if currentIndex >= totalWords - 1 { currentIndex = 0 }
-        isPlaying = true
-        scheduleNext()
+        if countdownSeconds > 0 {
+            countdown = countdownSeconds
+            tickCountdown()
+        } else {
+            isPlaying = true
+            scheduleNext()
+        }
+    }
+
+    private func tickCountdown() {
+        guard let current = countdown else { return }
+        if current <= 0 {
+            countdown = nil
+            isPlaying = true
+            scheduleNext()
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.countdown != nil else { return }
+            self.countdown = (self.countdown ?? 1) - 1
+            self.tickCountdown()
+        }
+        countdownWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
     func pause() {
         isPlaying = false
         pendingWork?.cancel()
         pendingWork = nil
+        countdownWork?.cancel()
+        countdownWork = nil
+        countdown = nil
     }
 
-    func togglePlay() { isPlaying ? pause() : play() }
+    func togglePlay() {
+        if isPlaying || countdown != nil { pause() } else { play() }
+    }
 
     func reset() {
         pause()
@@ -221,10 +263,11 @@ final class PrompterModel: ObservableObject {
 
     func handleKey(_ event: NSEvent) -> Bool {
         guard mode == .prompting, !event.modifierFlags.contains(.command) else { return false }
+        let fine = event.modifierFlags.contains(.shift)
         switch event.keyCode {
         case 49: togglePlay(); return true          // espacio
-        case 123: skip(-10); return true            // ←
-        case 124: skip(+10); return true            // →
+        case 123: skip(fine ? -1 : -10); return true    // ← (⇧: palabra a palabra)
+        case 124: skip(fine ? +1 : +10); return true    // → (⇧: palabra a palabra)
         case 126: changeSpeed(+Settings.Limits.wpmStep); return true   // ↑
         case 125: changeSpeed(-Settings.Limits.wpmStep); return true   // ↓
         case 53: backToEditor(); return true        // esc

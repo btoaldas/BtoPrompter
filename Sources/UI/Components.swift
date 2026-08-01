@@ -20,6 +20,25 @@ struct ControlButton: View {
     }
 }
 
+// Cuenta regresiva antes de reproducir: número gigante sobre el contenido.
+struct CountdownOverlay: View {
+    @EnvironmentObject var model: PrompterModel
+    let number: Int
+    let compact: Bool
+
+    var body: some View {
+        Text("\(max(1, number))")
+            .font(.system(size: compact ? 34 : 120, weight: .black, design: .rounded))
+            .foregroundColor(Theme.accent)
+            .shadow(color: .black.opacity(0.8), radius: 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(compact ? 0.35 : 0.45))
+            .contentShape(Rectangle())
+            .onTapGesture { model.pause() }
+            .help("Toca (o espacio) para cancelar")
+    }
+}
+
 struct SpyToggle: View {
     @EnvironmentObject var model: PrompterModel
 
