@@ -226,6 +226,8 @@ struct VoiceSettingsTab: View {
                     .font(.system(size: 10)).foregroundColor(.secondary)
             }
 
+            LocalModelsView()
+
             Section("Proveedores externos") {
                 Toggle("Autorizo enviar mi voz en vivo al proveedor que yo elija",
                        isOn: $cloudConsent)
