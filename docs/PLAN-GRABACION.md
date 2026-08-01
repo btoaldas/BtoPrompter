@@ -550,3 +550,22 @@ Listadas aparte para que no se pierdan entre lo confirmado.
 Fuentes de la comparativa competitiva: [Setapp — mejores teleprompters](https://setapp.com/app-reviews/best-teleprompter-apps) · [ShareSpeak — comparativa de precios 2026](https://sharespeak.co/teleprompter-pricing-comparison) · [Riverside — teleprompters para Mac](https://riverside.com/blog/best-teleprompter-apps-for-mac) · [CursorClip — grabadores de pantalla para Mac 2026](https://cursorclip.com/blog/13-top-screen-recording-mac-apps/) · [ngram — alternativas a Screen Studio](https://www.ngram.com/blog/screen-studio-alternatives-price-hike) · [Docsie — Screen Studio vs Loom](https://www.docsie.io/vs/screen-studio-vs-loom/)
 
 Documentación oficial de Apple citada a lo largo del plan: [SCRecordingOutput](https://developer.apple.com/documentation/screencapturekit/screcordingoutput) · [Capturing screen content in macOS](https://developer.apple.com/documentation/ScreenCaptureKit/capturing-screen-content-in-macos) · [com.apple.security.device.camera](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.camera) · [persistent-content-capture](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.persistent-content-capture) · [NSWindow.sharingType](https://developer.apple.com/documentation/appkit/nswindow/sharingtype) · [AVCaptureMovieFileOutput](https://developer.apple.com/documentation/avfoundation/avcapturemoviefileoutput) · [CGRequestScreenCaptureAccess](https://developer.apple.com/documentation/coregraphics/cgrequestscreencaptureaccess()) · [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime) · [PDFDocument](https://developer.apple.com/documentation/pdfkit/pdfdocument) · [VNRecognizeTextRequest](https://developer.apple.com/documentation/vision/vnrecognizetextrequest) · [RecognizeDocumentsRequest](https://developer.apple.com/documentation/vision/recognizedocumentsrequest) · [XMLParser](https://developer.apple.com/documentation/foundation/xmlparser)
+---
+
+## Apéndice B — Decisiones cerradas por el autor (1 de agosto de 2026)
+
+Estas respuestas fijan el diseño. Las preguntas correspondientes de la sección 8
+quedan resueltas y no se vuelven a plantear.
+
+| Tema | Decisión |
+|---|---|
+| El prompter en la grabación de pantalla | **Nunca aparece.** Se descarta la Opción A (invertir la invisibilidad) y también la Opción B (componer el prompter dentro del vídeo). El vídeo queda limpio. |
+| Modos de grabación | **Tres, a elección:** solo cámara (con vista previa para verse), solo pantalla, o ambas a la vez. |
+| Archivos | **Siempre separados**, uno por fuente, lo más sincronizados posible. El editor permitirá desplazar uno respecto al otro si hiciera falta. |
+| Grabar mientras se sigue por voz | **Deben convivir.** Es el caso de uso principal: leer con el prompter mientras se graba. No son modos excluyentes. |
+| Formato de salida | **Horizontal.** Vertical queda planificado para más adelante, sin prioridad. |
+| Conservación de los vídeos | **Nunca se borran solos.** Viven en `~/Movies/BtoPrompter/`, accesible desde el Finder sin abrir la app, y también se pueden borrar desde la app. |
+| PDFs largos | **Se importan enteros**, sin pedir rango. Solo un aviso cuando vaya a tardar. |
+| Botón de grabar en el remoto | **Requiere confirmación en el Mac.** El código de la URL no basta para encender la cámara. |
+| Capítulos automáticos desde el guion | Idea propuesta por el desarrollo, no pedida. Queda al final de la cola y solo si aporta valor real. |
+| Control sin Wi-Fi | Ambas rutas quedan **planificadas sin implementar**: punto de acceso del iPhone (sin desarrollo) y app iOS con Bluetooth (exige cuenta de pago). |
