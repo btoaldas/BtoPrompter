@@ -18,8 +18,10 @@ swiftc -O -target "${ARCH}-apple-macos${MIN_OS}" \
 # firma ad-hoc y macOS pedirá los permisos otra vez tras cada build.
 SIGN_ID="${BTOPROMPTER_SIGN_ID:-BtoPrompter Local Signing}"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
-  codesign -s "$SIGN_ID" --force --options runtime "$APP" 2>/dev/null \
-    || codesign -s "$SIGN_ID" --force "$APP"
+  # Con runtime reforzado hay que declarar los permisos que la app usa
+  # (micrófono, eventos de otras apps); si no, macOS los deniega sin preguntar.
+  codesign -s "$SIGN_ID" --force --options runtime \
+    --entitlements BtoPrompter.entitlements "$APP"
 else
   codesign -s - --force "$APP"
 fi
