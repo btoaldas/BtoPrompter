@@ -50,9 +50,11 @@ struct EditorPane: View {
                 headerRow(doc)
                 editorArea(doc)
                 actionsRow(doc)
-                Text("Atajos en el prompter:  ␣ play/pausa · ← → saltar 10 palabras · ↑ ↓ velocidad · + − letra · [ ] transparencia · R reiniciar · Esc volver aquí")
-                    .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                Text("En el prompter:  ␣ play/pausa · ← → ±10 palabras · ⇧← ⇧→ ±1 · 1–9 secciones · ↑ ↓ velocidad · + − letra · [ ] transparencia · M mini · R reiniciar · Esc volver")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
             .onAppear { syncDraft() }
@@ -109,82 +111,128 @@ struct EditorPane: View {
         }
     }
 
-    private func actionsRow(_ doc: SpeechDoc) -> some View {
-        HStack(spacing: 14) {
-            Button {
+    // MARK: Barra de acciones
+
+    // Piezas reutilizables: la fila se arma en tres densidades y se elige la
+    // que quepa, para que al estrechar la ventana no se recorte ningún control.
+    private func toolIcons(_ doc: SpeechDoc) -> some View {
+        HStack(spacing: 3) {
+            IconAction(symbol: "doc.on.clipboard", help: "Pegar el portapapeles") {
                 if let s = NSPasteboard.general.string(forType: .string) {
                     bodyDraft = s
                     draftDocID = doc.id
                     store.update(doc.id) { $0.body = s }
                 }
-            } label: {
-                Label("Pegar", systemImage: "doc.on.clipboard")
             }
-            Button {
+            IconAction(symbol: "trash", help: "Vaciar el discurso") {
                 bodyDraft = ""
                 draftDocID = doc.id
                 store.update(doc.id) { $0.body = "" }
-            } label: {
-                Label("Limpiar", systemImage: "trash")
             }
-            Text("Guardado automático ✓")
-                .font(.system(size: 10))
-                .foregroundColor(.gray)
-            Spacer()
-            HStack(spacing: 6) {
-                Button("−") { model.changeSpeed(-Settings.Limits.wpmStep) }
-                Text("\(model.wpm) ppm")
-                    .font(.system(.body, design: .monospaced))
-                    .frame(width: 74)
-                Button("+") { model.changeSpeed(+Settings.Limits.wpmStep) }
-            }
-            .help("Velocidad en palabras por minuto")
-            HStack(spacing: 4) {
-                Text("Meta").font(.system(size: 11)).foregroundColor(.gray)
-                TextField("min", text: .init(
-                    get: {
-                        guard let t = doc.targetMinutes else { return "" }
-                        return t == t.rounded() ? String(Int(t)) : String(format: "%.1f", t)
-                    },
-                    set: { v in
-                        let parsed = Double(v.replacingOccurrences(of: ",", with: "."))
-                        store.update(doc.id) { $0.targetMinutes = parsed }
-                    }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 44)
-                Text("min").font(.system(size: 11)).foregroundColor(.gray)
-            }
-            .help("Duración objetivo: al terminar un ensayo te digo qué velocidad necesitas para cumplirla")
-            Button {
+            IconAction(symbol: speechPlayback.speaking ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                       help: speechPlayback.speaking ? "Detener la lectura" : "Escuchar el discurso") {
                 if speechPlayback.speaking { speechPlayback.stop() }
                 else { speechPlayback.speak(doc.body) }
-            } label: {
-                Image(systemName: speechPlayback.speaking ? "speaker.slash.fill" : "speaker.wave.2.fill")
             }
-            .help(speechPlayback.speaking ? "Detener lectura en voz alta" : "Escuchar el discurso con una voz de macOS")
-            Button {
-                exportPDF(doc)
-            } label: {
-                Image(systemName: "doc.richtext")
-            }
-            .help("Exportar el guion marcado a PDF (respaldo en papel)")
-            Button {
-                showAISheet = true
-            } label: {
-                Label(model.aiEnabled ? "Ensayo IA" : "IA…", systemImage: "sparkles")
-            }
-            .help("Ensayo con IA: marca el ritmo del discurso (pausas, énfasis, velocidades) sin cambiar tus palabras")
-            Button {
-                model.startPrompter()
-            } label: {
-                Label("Iniciar", systemImage: "play.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
-            .foregroundColor(.black)
-            .disabled(doc.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            IconAction(symbol: "doc.richtext", help: "Exportar a PDF") { exportPDF(doc) }
+            IconAction(symbol: "sparkles", help: "Ensayo con IA: marca el ritmo sin cambiar tus palabras",
+                       tinted: model.aiEnabled) { showAISheet = true }
         }
+    }
+
+    private func speedControl(showUnit: Bool) -> some View {
+        HStack(spacing: 2) {
+            StepperButton(symbol: "minus") { model.changeSpeed(-Settings.Limits.wpmStep) }
+            Text("\(model.wpm)")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .frame(width: 30)
+            StepperButton(symbol: "plus") { model.changeSpeed(+Settings.Limits.wpmStep) }
+            if showUnit {
+                Text("ppm").font(.system(size: 10)).foregroundColor(.secondary).fixedSize()
+            }
+        }
+        .help("Velocidad de lectura en palabras por minuto")
+    }
+
+    private func targetControl(_ doc: SpeechDoc, showUnit: Bool) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "target").font(.system(size: 10)).foregroundColor(.secondary)
+            TextField("—", text: .init(
+                get: {
+                    guard let t = doc.targetMinutes else { return "" }
+                    return t == t.rounded() ? String(Int(t)) : String(format: "%.1f", t)
+                },
+                set: { v in
+                    let parsed = Double(v.replacingOccurrences(of: ",", with: "."))
+                    store.update(doc.id) { $0.targetMinutes = parsed }
+                }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 38)
+            if showUnit {
+                Text("min").font(.system(size: 10)).foregroundColor(.secondary).fixedSize()
+            }
+        }
+        .help("Duración objetivo del discurso: al terminar el ensayo te digo qué velocidad necesitas")
+    }
+
+    private func startButton(_ doc: SpeechDoc, compact: Bool) -> some View {
+        Button {
+            model.startPrompter()
+        } label: {
+            if compact {
+                Image(systemName: "play.fill").frame(width: 22)
+            } else {
+                Label("Iniciar", systemImage: "play.fill").fixedSize()
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.accent)
+        .foregroundColor(.black)
+        .keyboardShortcut(.return, modifiers: .command)
+        .disabled(doc.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help("Iniciar el prompter (⌘⏎)")
+    }
+
+    private func actionsRow(_ doc: SpeechDoc) -> some View {
+        ViewThatFits(in: .horizontal) {
+            // Completa
+            HStack(spacing: 8) {
+                toolIcons(doc)
+                Divider().frame(height: 18)
+                speedControl(showUnit: true)
+                targetControl(doc, showUnit: true)
+                Spacer(minLength: 6)
+                Text("Guardado ✓").font(.system(size: 10))
+                    .foregroundColor(.secondary).fixedSize()
+                startButton(doc, compact: false)
+            }
+            // Sin la nota de guardado
+            HStack(spacing: 10) {
+                toolIcons(doc)
+                Divider().frame(height: 18)
+                speedControl(showUnit: true)
+                targetControl(doc, showUnit: true)
+                Spacer(minLength: 6)
+                startButton(doc, compact: false)
+            }
+            // Sin unidades escritas
+            HStack(spacing: 8) {
+                toolIcons(doc)
+                speedControl(showUnit: false)
+                targetControl(doc, showUnit: false)
+                Spacer(minLength: 4)
+                startButton(doc, compact: false)
+            }
+            // Mínima: todo en iconos
+            HStack(spacing: 6) {
+                toolIcons(doc)
+                speedControl(showUnit: false)
+                Spacer(minLength: 2)
+                startButton(doc, compact: true)
+            }
+        }
+        .frame(height: 28)
     }
 
     private func exportPDF(_ doc: SpeechDoc) {

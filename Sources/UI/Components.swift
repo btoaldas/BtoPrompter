@@ -83,6 +83,43 @@ struct RehearsalResultOverlay: View {
     }
 }
 
+// Acción secundaria de la barra del editor: solo icono, con ayuda emergente.
+// Tamaño fijo para que la fila no cambie de ancho ni recorte etiquetas.
+struct IconAction: View {
+    let symbol: String
+    let help: String
+    var tinted: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(tinted ? Theme.accent : .primary)
+                .frame(width: 20, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .help(help)
+    }
+}
+
+// Botón compacto de más/menos para los pasos de velocidad.
+struct StepperButton: View {
+    let symbol: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 18, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+    }
+}
+
 struct SpyToggle: View {
     @EnvironmentObject var model: PrompterModel
 
