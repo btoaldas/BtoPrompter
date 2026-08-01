@@ -1,7 +1,7 @@
 # BtoPrompter
 
 **ES** — Teleprompter flotante para macOS, invisible al compartir pantalla.
-**EN** — Floating teleprompter for macOS, invisible to screen sharing (Zoom, Teams, Meet). Word-by-word karaoke highlighting, adjustable speed and transparency. Single-file Swift app, no dependencies.
+**EN** — Floating teleprompter for macOS, invisible to screen sharing (Zoom, Teams, Meet). Word-by-word karaoke highlighting, adjustable speed and transparency. Pure Swift app, no dependencies.
 
 ---
 
@@ -24,6 +24,8 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 📏 **Modo minimalista** — barra delgada pegada arriba de la pantalla (debajo del notch), todo el ancho, karaoke en máximo 2 líneas con controles esenciales a los costados. Tecla `M` para entrar y salir; el alto se adapta al tamaño de letra.
 - 🔠 **Tamaño de letra ajustable** en vivo.
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
+- ⚙️ **Configuración central** (engranaje o `⌘,`): velocidad, letras, transparencia, comportamiento, proveedor de IA y comprobación de actualizaciones contra GitHub Releases.
+- 🗄️ **Organización**: arrastra discursos a carpetas (o usa el menú contextual), colapsa carpetas, marca borradores, archiva.
 
 ### Atajos de teclado
 
@@ -47,7 +49,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 
 ## Tecnología
 
-- **Swift** (AppKit + SwiftUI), un solo archivo fuente, cero dependencias externas.
+- **Swift** (AppKit + SwiftUI), cero dependencias externas, arquitectura por capas (ver [ARCHITECTURE.md](ARCHITECTURE.md)).
 - Tokenización de oraciones con **NaturalLanguage** (`NLTokenizer`).
 - Se compila con `swiftc` directo — no requiere proyecto de Xcode.
 - Requiere macOS 13 o superior (Apple Silicon o Intel).
