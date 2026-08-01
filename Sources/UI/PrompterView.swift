@@ -148,6 +148,12 @@ struct PrompterView: View {
             ControlButton(symbol: "forward.frame.fill", help: "Adelante 1 palabra (⇧→)", size: 13) { model.skip(+1) }
             ControlButton(symbol: "forward.fill", help: "Adelante 10 palabras (→)") { model.skip(+10) }
             ControlButton(symbol: "stop.fill", help: "Volver al editor (Esc)") { model.backToEditor() }
+            // Configuración sin salir del prompter: se puede ajustar todo en
+            // plena presentación sin parar ni volver a la vista principal.
+            ControlButton(symbol: "gearshape.fill",
+                          help: "Configuración (⌘,) — sin salir de la presentación") {
+                model.showSettings = true
+            }
             ControlButton(symbol: "menubar.dock.rectangle",
                           help: "Modo minimalista: barra de 2 líneas arriba de la pantalla (M)") {
                 model.toggleMiniMode()

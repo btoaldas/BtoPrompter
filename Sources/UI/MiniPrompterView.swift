@@ -78,6 +78,10 @@ struct MiniPrompterView: View {
                                   color: model.spyMode ? Theme.spyOn : Theme.spyOff) {
                         model.spyMode.toggle()
                     }
+                    ControlButton(symbol: "gearshape.fill",
+                                  help: "Configuración (⌘,)", size: 12) {
+                        model.showSettings = true
+                    }
                     ControlButton(symbol: "arrow.down.left.and.arrow.up.right",
                                   help: "Volver al tamaño normal (M)", size: 12) {
                         model.toggleMiniMode()
