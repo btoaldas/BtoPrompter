@@ -34,9 +34,9 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 🧠 **Perfil local del orador (opcional)** — aprende ritmo, longitud de frase, conectores y muletillas de tus ensayos. Compartir ese resumen con Ensayo IA requiere un segundo permiso explícito.
 - 🎨 **Estilos de ensayo propios** — crea, nombra, edita y elimina tus estilos, o **genera uno desde tus ensayos medidos**: con tus datos locales o redactado por la IA a partir de ellos.
 - 🔊 **Lectura en voz alta multi-proveedor** — voces de macOS, **voces locales propias** (modelos Piper `.onnx` que instalas tú) o ElevenLabs, OpenAI, Gemini y Deepgram Aura, eligiendo modelo y voz. Lo local no envía nada a internet.
-- 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza Keynote o PowerPoint por AppleScript: expones sin tocar nada.
+- 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza la presentación: Keynote y PowerPoint por AppleScript, o **cualquier app** enviando la flecha derecha (Vista Previa, PDF, navegador).
 - ⏱️ **Cronómetro de ensayo** — al terminar te dice tiempo real, ritmo efectivo y, si pones una meta en minutos, la velocidad exacta que necesitas; calibración con un clic.
-- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con página de botones grandes (play/pausa, velocidad, saltos) y QR para escanear; protegido con token, solo en tu red.
+- 📱 **Control remoto desde el teléfono (opcional)** — servidor local con QR para escanear y dos pestañas: **Teleprompter** (play/pausa, velocidad, saltos) y **Ordenador** (flechas, avance y retroceso de página, clics, trackpad virtual y teclado). Sirve para pasar diapositivas en Keynote, PowerPoint, Vista Previa, un PDF o el navegador, porque envía teclas reales del sistema. Protegido con token, solo en tu red, y el control del ordenador exige un permiso aparte.
 - 📄 **Exportar a PDF** — el guion marcado (guías, velocidades, pausas) listo para imprimir como respaldo.
 - 🔄 **Auto-actualización** — el aviso de versión nueva descarga, valida e instala solo (desactivable).
 - 🗄️ **Organización**: arrastra discursos a carpetas (o usa el menú contextual), colapsa carpetas, marca borradores, archiva.

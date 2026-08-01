@@ -405,6 +405,20 @@ struct DiagnosticsSettingsTab: View {
 
 struct RemoteTab: View {
     @ObservedObject private var remote = RemoteControl.shared
+    @State private var trusted = RemoteInput.isTrusted
+
+    private var computerControlBinding: Binding<Bool> {
+        Binding(
+            get: { Settings.bool(.remoteComputerControl, default: false) },
+            set: { on in
+                Settings.set(on, .remoteComputerControl)
+                if on {
+                    RemoteInput.requestTrust()
+                    trusted = RemoteInput.isTrusted
+                }
+            }
+        )
+    }
 
     private var enabledBinding: Binding<Bool> {
         Binding(
@@ -425,6 +439,34 @@ struct RemoteTab: View {
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Toggle("Permitir que el remoto controle el ordenador", isOn: computerControlBinding)
+                .toggleStyle(.switch)
+            Text("Añade una segunda pestaña en el teléfono con flechas, clics, trackpad y teclado. Sirve para pasar diapositivas en Keynote, PowerPoint, Vista Previa o un PDF, y para manejar el Mac desde lejos. Requiere permiso de Accesibilidad.")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if Settings.bool(.remoteComputerControl, default: false) {
+                HStack(spacing: 8) {
+                    Image(systemName: trusted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(trusted ? .green : .orange)
+                    Text(trusted ? "Permiso de Accesibilidad concedido"
+                                 : "Falta el permiso de Accesibilidad")
+                        .font(.system(size: 11))
+                    if !trusted {
+                        Button("Conceder") {
+                            RemoteInput.requestTrust()
+                            RemoteInput.openAccessibilitySettings()
+                        }
+                        .font(.system(size: 11))
+                    }
+                    Button("Comprobar") { trusted = RemoteInput.isTrusted }
+                        .font(.system(size: 11))
+                }
+            }
+            Divider()
+
             if remote.running, let url = remote.url {
                 if let qr = Self.qrImage(url) {
                     Image(nsImage: qr)

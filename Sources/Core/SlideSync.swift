@@ -22,10 +22,27 @@ final class SlideSync: ObservableObject {
     static let targets: [(id: String, name: String)] = [
         ("keynote", "Keynote"),
         ("powerpoint", "PowerPoint"),
+        ("tecla", "Cualquier app (flecha derecha)"),
     ]
 
     func advanceSlide() {
         guard enabled else { return }
+        // Modo genérico: manda la flecha derecha a la app que tenga el foco.
+        // Funciona en Vista Previa, visores de PDF, navegadores y presentaciones.
+        if targetApp == "tecla" {
+            DispatchQueue.main.async {
+                guard RemoteInput.isTrusted else {
+                    self.status = "Para avanzar con la flecha hace falta el permiso de Accesibilidad."
+                    return
+                }
+                let previous = Settings.bool(.remoteComputerControl, default: false)
+                Settings.set(true, .remoteComputerControl)
+                RemoteInput.key("right")
+                Settings.set(previous, .remoteComputerControl)
+                self.status = nil
+            }
+            return
+        }
         let source: String
         switch targetApp {
         case "powerpoint":
