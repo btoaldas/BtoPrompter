@@ -2,8 +2,11 @@ import AVFoundation
 import CoreImage
 import Foundation
 
-// Composición de una grabación: cámara sobre pantalla (o lado a lado), con la
-// forma y posición del preset elegido, alineadas con el desfase del sync.json.
+// El motor de dibujo del editor de composición. Cada fotograma pregunta al
+// proyecto QUÉ receta rige en su instante (tramos de tiempo) y la pinta:
+// cámara sobre pantalla, lado a lado con reparto ajustable, recortes por
+// fuente y fondo de color, degradado o imagen.
+//
 // El MISMO compositor sirve para previsualizar y para exportar: lo que se ve
 // es exactamente lo que sale.
 //
@@ -11,52 +14,39 @@ import Foundation
 // Core Animation es solo para render offline y MATA la app si se asigna a un
 // AVPlayerItem (excepción ObjC no capturable; reproducido en esta Mac).
 
-// MARK: - Modelo
+// MARK: - Parámetros compartidos
 
-// Un preset es la receta completa de un montaje. camRect va normalizado 0..1
-// con origen ARRIBA-izquierda (como piensa la gente); el compositor convierte
-// al origen ABAJO-izquierda de Core Image en un único lugar.
-struct CompositionLayout: Equatable {
-    enum Mode: String { case overlay, sideBySide, onlyScreen, onlyCamera }
-    enum Shape: String { case rect, rounded, circle }
-
-    var mode: Mode = .overlay
-    var camRect = CGRect(x: 0.72, y: 0.62, width: 0.25, height: 0.34)
-    var shape: Shape = .circle
-    var borderWidth: CGFloat = 0.012      // fracción del lado menor del lienzo
-    var background: (r: CGFloat, g: CGFloat, b: CGFloat) = (0.07, 0.09, 0.13)
-
-    static func == (a: CompositionLayout, b: CompositionLayout) -> Bool {
-        a.mode == b.mode && a.camRect == b.camRect && a.shape == b.shape
-            && a.borderWidth == b.borderWidth
-            && a.background == b.background
-    }
-
-    // Presets de fábrica, en el orden de las teclas 1–4.
-    static let presets: [(name: String, layout: CompositionLayout)] = [
-        ("Solo pantalla", CompositionLayout(mode: .onlyScreen)),
-        ("Cara en círculo", CompositionLayout()),
-        ("Lado a lado", CompositionLayout(mode: .sideBySide, shape: .rounded)),
-        ("Solo cámara", CompositionLayout(mode: .onlyCamera)),
-    ]
-}
-
-// Caja de parámetros compartida entre la UI y el compositor (hilos distintos).
-// Cambiar el layout NO exige reconstruir la composición: el siguiente
-// fotograma ya se dibuja con la receta nueva.
+// Caja compartida entre la UI y el compositor (hilos distintos). Cambiar el
+// proyecto NO exige reconstruir la composición: el siguiente fotograma ya se
+// dibuja con la receta nueva.
 final class CompositionParameters: @unchecked Sendable {
     static let shared = CompositionParameters()
     private let lock = NSLock()
-    private var _layout = CompositionLayout()
-    var layout: CompositionLayout {
-        get { lock.lock(); defer { lock.unlock() }; return _layout }
-        set { lock.lock(); _layout = newValue; lock.unlock() }
+    private var _project = VideoProject()
+    private var _exportProject: VideoProject?
+    var project: VideoProject {
+        get { lock.lock(); defer { lock.unlock() }; return _project }
+        set { lock.lock(); _project = newValue; lock.unlock() }
+    }
+    // Copia CONGELADA para la exportación: si el usuario sigue moviendo
+    // sliders mientras exporta, el archivo sale con lo que había al pulsar
+    // Exportar, no con una mezcla de ambos.
+    var exportProject: VideoProject? {
+        get { lock.lock(); defer { lock.unlock() }; return _exportProject }
+        set { lock.lock(); _exportProject = newValue; lock.unlock() }
     }
 }
 
-// MARK: - Compositor
+// El mismo dibujo, pero leyendo la copia congelada. Es la clase que se asigna
+// a la composición de EXPORTACIÓN; la de previsualización usa PiPCompositor.
+final class ExportCompositor: PiPCompositor {
+    override var useExportSnapshot: Bool { true }
+}
 
-// Instrucción propia: transporta los IDs de las dos pistas.
+// MARK: - Instrucción
+
+// Una sola instrucción cubre toda la línea de tiempo (imposible dejar huecos,
+// que revientan la exportación con -11841); el compositor decide por instante.
 final class PiPInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let timeRange: CMTimeRange
     let enablePostProcessing = false
@@ -70,13 +60,19 @@ final class PiPInstruction: NSObject, AVVideoCompositionInstructionProtocol {
         self.timeRange = timeRange
         self.screenTrack = screenTrack
         self.cameraTrack = cameraTrack
-        self.requiredSourceTrackIDs = [NSNumber(value: screenTrack), NSNumber(value: cameraTrack)]
+        // Solo las pistas que existen: con una fuente única la otra es Invalid.
+        self.requiredSourceTrackIDs = [screenTrack, cameraTrack]
+            .filter { $0 != kCMPersistentTrackID_Invalid }
+            .map { NSNumber(value: $0) }
     }
 }
 
-final class PiPCompositor: NSObject, AVVideoCompositing {
+// MARK: - Compositor
+
+class PiPCompositor: NSObject, AVVideoCompositing {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let queue = DispatchQueue(label: "pip.compositor")
+    var useExportSnapshot: Bool { false }
 
     var sourcePixelBufferAttributes: [String: any Sendable]? {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -96,66 +92,66 @@ final class PiPCompositor: NSObject, AVVideoCompositing {
                 return
             }
             let size = CGSize(width: CVPixelBufferGetWidth(out), height: CVPixelBufferGetHeight(out))
-            let layout = CompositionParameters.shared.layout
+            let project = (self.useExportSnapshot
+                           ? CompositionParameters.shared.exportProject : nil)
+                ?? CompositionParameters.shared.project
+            let seconds = request.compositionTime.seconds
+            let layout = project.layout(at: seconds)
 
-            let screen = request.sourceFrame(byTrackID: instruction.screenTrack).map { CIImage(cvPixelBuffer: $0) }
-            let camera = request.sourceFrame(byTrackID: instruction.cameraTrack).map { CIImage(cvPixelBuffer: $0) }
+            let screen = instruction.screenTrack == kCMPersistentTrackID_Invalid ? nil
+                : request.sourceFrame(byTrackID: instruction.screenTrack).map { CIImage(cvPixelBuffer: $0) }
+            let camera = instruction.cameraTrack == kCMPersistentTrackID_Invalid ? nil
+                : request.sourceFrame(byTrackID: instruction.cameraTrack).map { CIImage(cvPixelBuffer: $0) }
 
-            let image = Self.compose(screen: screen, camera: camera, layout: layout, canvas: size)
+            let image = FrameComposer.compose(screen: screen, camera: camera,
+                                              layout: layout, background: project.background,
+                                              canvas: size)
             self.context.render(image, to: out)
             request.finish(withComposedVideoFrame: out)
         }
     }
+}
 
-    // Función de dibujo pura: también la usa la exportación y cualquier
-    // miniatura futura. Un solo sitio → lo que se ve es lo que sale.
+// MARK: - Dibujo
+
+// Función de dibujo pura y única: la usan el compositor (preview y export) y
+// cualquier miniatura futura. Un solo sitio → WYSIWYG por construcción.
+enum FrameComposer {
+
     static func compose(screen: CIImage?, camera: CIImage?,
-                        layout: CompositionLayout, canvas: CGSize) -> CIImage {
-        let bg = CIImage(color: CIColor(red: layout.background.r,
-                                        green: layout.background.g,
-                                        blue: layout.background.b))
-            .cropped(to: CGRect(origin: .zero, size: canvas))
-
-        func fitted(_ img: CIImage, into rect: CGRect) -> CIImage {
-            let s = img.extent.size
-            guard s.width > 0, s.height > 0 else { return img }
-            // .fill: cubre el rectángulo y recorta el sobrante.
-            let scale = max(rect.width / s.width, rect.height / s.height)
-            let scaled = img.transformed(by: .init(scaleX: scale, y: scale))
-            let dx = rect.midX - scaled.extent.midX
-            let dy = rect.midY - scaled.extent.midY
-            return scaled.transformed(by: .init(translationX: dx, y: dy))
-                .cropped(to: rect)
-        }
-
-        // camRect llega con origen arriba-izquierda; Core Image usa abajo-izquierda.
-        func ciRect(_ n: CGRect) -> CGRect {
-            CGRect(x: n.minX * canvas.width,
-                   y: (1 - n.maxY) * canvas.height,
-                   width: n.width * canvas.width,
-                   height: n.height * canvas.height)
-        }
+                        layout: SegmentLayout, background: BackgroundStyle,
+                        canvas: CGSize) -> CIImage {
+        let bg = backgroundImage(background, canvas: canvas)
 
         switch layout.mode {
         case .onlyScreen:
             guard let screen else { return bg }
-            return fitted(screen, into: CGRect(origin: .zero, size: canvas)).composited(over: bg)
+            return place(screen, settings: layout.screen,
+                         into: CGRect(origin: .zero, size: canvas))
+                .composited(over: bg)
         case .onlyCamera:
             guard let camera else { return bg }
-            return fitted(camera, into: CGRect(origin: .zero, size: canvas)).composited(over: bg)
+            return place(camera, settings: layout.camera,
+                         into: CGRect(origin: .zero, size: canvas))
+                .composited(over: bg)
         case .sideBySide:
             var result = bg
             let m = canvas.width * 0.02
-            let half = (canvas.width - 3 * m) / 2
-            let h = min(canvas.height - 2 * m, half * 9 / 16 * 2)
-            let y = (canvas.height - h) / 2
+            let usable = canvas.width - 3 * m
+            // El reparto es la fracción del ancho para la cámara: 30/70, 50/50…
+            let camW = usable * layout.splitRatio
+            let scrW = usable - camW
+            let h = canvas.height - 2 * m
+            let y = m
             if let camera {
-                result = shaped(fitted(camera, into: CGRect(x: m, y: y, width: half, height: h)),
+                let rect = CGRect(x: m, y: y, width: camW, height: h)
+                result = shaped(place(camera, settings: layout.camera, into: rect),
                                 shape: layout.shape, layout: layout, canvas: canvas)
                     .composited(over: result)
             }
             if let screen {
-                result = shaped(fitted(screen, into: CGRect(x: half + 2 * m, y: y, width: half, height: h)),
+                let rect = CGRect(x: m + camW + m, y: y, width: scrW, height: h)
+                result = shaped(place(screen, settings: layout.screen, into: rect),
                                 shape: layout.shape, layout: layout, canvas: canvas)
                     .composited(over: result)
             }
@@ -163,18 +159,19 @@ final class PiPCompositor: NSObject, AVVideoCompositing {
         case .overlay:
             var result = bg
             if let screen {
-                result = fitted(screen, into: CGRect(origin: .zero, size: canvas)).composited(over: result)
+                result = place(screen, settings: layout.screen,
+                               into: CGRect(origin: .zero, size: canvas))
+                    .composited(over: result)
             }
             if let camera {
-                let rect = ciRect(layout.camRect)
-                // El círculo exige rectángulo cuadrado: se centra en el menor lado.
-                let square = layout.shape == .circle
-                    ? CGRect(x: rect.midX - min(rect.width, rect.height) / 2,
-                             y: rect.midY - min(rect.width, rect.height) / 2,
-                             width: min(rect.width, rect.height),
-                             height: min(rect.width, rect.height))
+                let rect = ciRect(layout.camRect.cgRect, canvas: canvas)
+                // El círculo exige ventana cuadrada: se centra en el lado menor.
+                let side = min(rect.width, rect.height)
+                let window = layout.shape == .circle
+                    ? CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2,
+                             width: side, height: side)
                     : rect
-                result = shaped(fitted(camera, into: square),
+                result = shaped(place(camera, settings: layout.camera, into: window),
                                 shape: layout.shape, layout: layout, canvas: canvas)
                     .composited(over: result)
             }
@@ -182,15 +179,153 @@ final class PiPCompositor: NSObject, AVVideoCompositing {
         }
     }
 
+    // camRect llega con origen arriba-izquierda; Core Image usa abajo-izquierda.
+    private static func ciRect(_ n: CGRect, canvas: CGSize) -> CGRect {
+        CGRect(x: n.minX * canvas.width,
+               y: (1 - n.maxY) * canvas.height,
+               width: n.width * canvas.width,
+               height: n.height * canvas.height)
+    }
+
+    // Coloca una fuente en su ventana según sus ajustes (escala o recorte).
+    private static func place(_ image: CIImage, settings: SourceSettings, into rect: CGRect) -> CIImage {
+        var source = image
+        // Recorte manual: primero se queda solo la parte elegida del fotograma.
+        if settings.fit == .crop, !settings.crop.isFull {
+            let s = image.extent
+            let c = settings.crop.clamped()
+            // El crop viene con origen arriba-izquierda sobre la fuente.
+            let cropRect = CGRect(x: s.minX + c.x * s.width,
+                                  y: s.minY + (1 - c.y - c.height) * s.height,
+                                  width: c.width * s.width,
+                                  height: c.height * s.height)
+            source = image.cropped(to: cropRect)
+        }
+        let s = source.extent
+        guard s.width > 0, s.height > 0 else { return source }
+        let scale: CGFloat
+        switch settings.fit {
+        case .fill, .crop:
+            scale = max(rect.width / s.width, rect.height / s.height)
+        case .fit:
+            scale = min(rect.width / s.width, rect.height / s.height)
+        }
+        let scaled = source.transformed(by: .init(scaleX: scale, y: scale))
+        let dx = rect.midX - scaled.extent.midX
+        let dy = rect.midY - scaled.extent.midY
+        let moved = scaled.transformed(by: .init(translationX: dx, y: dy))
+        return settings.fit == .fit ? moved.cropped(to: moved.extent.intersection(rect))
+                                    : moved.cropped(to: rect)
+    }
+
+    // MARK: Fondos
+
+    // La imagen de fondo se decodifica UNA vez por ruta (los fotogramas llegan
+    // a 30 por segundo; releer el archivo en cada uno sería absurdo).
+    private static let imageCache = NSCache<NSString, CIImage>()
+
+    private static func backgroundImage(_ style: BackgroundStyle, canvas: CGSize) -> CIImage {
+        let frame = CGRect(origin: .zero, size: canvas)
+        switch style {
+        case .color(let c):
+            return CIImage(color: CIColor(red: c.r, green: c.g, blue: c.b, alpha: c.a))
+                .cropped(to: frame)
+        case .gradient(let top, let bottom):
+            let f = CIFilter(name: "CILinearGradient", parameters: [
+                "inputPoint0": CIVector(x: 0, y: canvas.height),
+                "inputColor0": CIColor(red: top.r, green: top.g, blue: top.b, alpha: top.a),
+                "inputPoint1": CIVector(x: 0, y: 0),
+                "inputColor1": CIColor(red: bottom.r, green: bottom.g, blue: bottom.b, alpha: bottom.a),
+            ])
+            return (f?.outputImage ?? CIImage.empty()).cropped(to: frame)
+        case .image(let path, let mode):
+            guard let img = cachedImage(path) else {
+                return CIImage(color: CIColor(red: 0.1, green: 0.1, blue: 0.1)).cropped(to: frame)
+            }
+            return placedBackground(img, mode: mode, canvas: canvas)
+        }
+    }
+
+    // Las rutas que fallaron también se recuerdan: sin esto, una imagen
+    // borrada provocaba una lectura de disco fallida por CADA fotograma.
+    private static let missingLock = NSLock()
+    private static var missingPaths = Set<String>()
+
+    static func forgetMissing(_ path: String) {
+        missingLock.lock()
+        missingPaths.remove(path)
+        missingLock.unlock()
+    }
+
+    private static func cachedImage(_ path: String) -> CIImage? {
+        if let hit = imageCache.object(forKey: path as NSString) { return hit }
+        missingLock.lock()
+        let known = missingPaths.contains(path)
+        missingLock.unlock()
+        if known { return nil }
+        guard let img = CIImage(contentsOf: URL(fileURLWithPath: path)) else {
+            missingLock.lock()
+            missingPaths.insert(path)
+            missingLock.unlock()
+            return nil
+        }
+        imageCache.setObject(img, forKey: path as NSString)
+        return img
+    }
+
+    private static func placedBackground(_ img: CIImage, mode: BackgroundStyle.ImageMode,
+                                         canvas: CGSize) -> CIImage {
+        let frame = CGRect(origin: .zero, size: canvas)
+        let s = img.extent.size
+        guard s.width > 0, s.height > 0 else { return CIImage.empty().cropped(to: frame) }
+        let base = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: frame)
+        switch mode {
+        case .fill:
+            let scale = max(canvas.width / s.width, canvas.height / s.height)
+            return centered(img, scale: scale, canvas: canvas).cropped(to: frame)
+        case .fit:
+            let scale = min(canvas.width / s.width, canvas.height / s.height)
+            return centered(img, scale: scale, canvas: canvas)
+                .composited(over: base).cropped(to: frame)
+        case .stretch:
+            return img.transformed(by: .init(scaleX: canvas.width / s.width,
+                                             y: canvas.height / s.height))
+                .transformed(by: .init(translationX: -img.extent.minX * canvas.width / s.width,
+                                       y: -img.extent.minY * canvas.height / s.height))
+                .cropped(to: frame)
+        case .tile:
+            // CIImage infinita por teselado y recorte al lienzo.
+            let tiled = img.transformed(by: .init(translationX: -img.extent.minX,
+                                                  y: -img.extent.minY))
+            let f = CIFilter(name: "CIAffineTile", parameters: [
+                kCIInputImageKey: tiled,
+                kCIInputTransformKey: NSAffineTransform(),
+            ])
+            return (f?.outputImage ?? tiled).cropped(to: frame)
+        case .center:
+            return centered(img, scale: 1, canvas: canvas)
+                .composited(over: base).cropped(to: frame)
+        }
+    }
+
+    private static func centered(_ img: CIImage, scale: CGFloat, canvas: CGSize) -> CIImage {
+        let scaled = img.transformed(by: .init(scaleX: scale, y: scale))
+        let dx = canvas.width / 2 - scaled.extent.midX
+        let dy = canvas.height / 2 - scaled.extent.midY
+        return scaled.transformed(by: .init(translationX: dx, y: dy))
+    }
+
+    // MARK: Formas
+
     // Recorta la imagen a la forma pedida y le pinta el aro del borde.
-    private static func shaped(_ image: CIImage, shape: CompositionLayout.Shape,
-                               layout: CompositionLayout, canvas: CGSize) -> CIImage {
+    private static func shaped(_ image: CIImage, shape: SegmentLayout.Shape,
+                               layout: SegmentLayout, canvas: CGSize) -> CIImage {
         guard shape != .rect else { return image }
         let rect = image.extent
+        guard rect.width > 0, rect.height > 0 else { return image }
         let radius = shape == .circle ? rect.width / 2 : min(rect.width, rect.height) * 0.08
         let border = layout.borderWidth * min(canvas.width, canvas.height)
 
-        // Máscara con CGContext (cacheable por geometría si hiciera falta).
         func maskImage(_ r: CGRect, inset: CGFloat) -> CIImage? {
             let w = Int(r.width), h = Int(r.height)
             guard w > 0, h > 0,
@@ -199,6 +334,7 @@ final class PiPCompositor: NSObject, AVVideoCompositing {
                                       bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
             ctx.setFillColor(gray: 1, alpha: 1)
             let box = CGRect(x: 0, y: 0, width: r.width, height: r.height).insetBy(dx: inset, dy: inset)
+            guard box.width > 0, box.height > 0 else { return nil }
             let rad = max(0, radius - inset)
             ctx.addPath(CGPath(roundedRect: box, cornerWidth: min(rad, box.width / 2),
                                cornerHeight: min(rad, box.height / 2), transform: nil))
@@ -217,7 +353,6 @@ final class PiPCompositor: NSObject, AVVideoCompositing {
         var result = blend?.outputImage ?? image
 
         if border > 0 {
-            // Aro: forma llena de color menos la forma encogida.
             guard let outer = maskImage(rect, inset: 0),
                   let inner = maskImage(rect, inset: border) else { return result }
             let ringMask = CIFilter(name: "CISourceOutCompositing", parameters: [
@@ -242,8 +377,8 @@ final class PiPCompositor: NSObject, AVVideoCompositing {
 enum CompositionBuilder {
 
     struct Sources {
-        let screenURL: URL
-        let cameraURL: URL
+        let screenURL: URL?
+        let cameraURL: URL?
         let offsetSeconds: Double   // pantalla − cámara, del sync.json
     }
 
@@ -253,10 +388,11 @@ enum CompositionBuilder {
         guard let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
             return nil
         }
-        guard let cam = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") }),
-              let scr = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") }) else {
-            return nil
-        }
+        let cam = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") })
+        let scr = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") })
+        // Con UNA sola pieza también se puede componer (recortes y fondo
+        // siguen valiendo); la grabación de fábrica es solo-cámara.
+        guard cam != nil || scr != nil else { return nil }
         var offset = 0.0
         if let data = try? Data(contentsOf: folder.appendingPathComponent("sync.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -268,25 +404,28 @@ enum CompositionBuilder {
 
     // Composición alineada y recortada a la pista más corta. La regla dura:
     // las instrucciones deben teselar [0, duración] sin huecos ni solapes, o
-    // la exportación revienta con -11841.
+    // la exportación revienta con -11841 (aquí: una sola instrucción total).
     static func build(_ src: Sources) async throws
-        -> (composition: AVMutableComposition, video: AVMutableVideoComposition) {
-        let screenAsset = AVURLAsset(url: src.screenURL)
-        let cameraAsset = AVURLAsset(url: src.cameraURL)
+        -> (composition: AVMutableComposition, video: AVMutableVideoComposition, duration: Double) {
+        let screenAsset = src.screenURL.map { AVURLAsset(url: $0) }
+        let cameraAsset = src.cameraURL.map { AVURLAsset(url: $0) }
 
         let comp = AVMutableComposition()
-        guard let screenTrack = try await screenAsset.loadTracks(withMediaType: .video).first,
-              let cameraTrack = try await cameraAsset.loadTracks(withMediaType: .video).first else {
+        let screenTrack = try await screenAsset?.loadTracks(withMediaType: .video).first
+        let cameraTrack = try await cameraAsset?.loadTracks(withMediaType: .video).first
+        guard screenTrack != nil || cameraTrack != nil else {
             throw NSError(domain: "CompositionBuilder", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Falta la pista de vídeo en alguno de los archivos"])
+                NSLocalizedDescriptionKey: "Ningún archivo tiene pista de vídeo"])
         }
 
-        let screenDur = try await screenAsset.load(.duration).seconds
-        let cameraDur = try await cameraAsset.load(.duration).seconds
         // El archivo que empezó tarde se corre hacia delante; ambos rebasan a
         // cero en disco, así que el desfase del sidecar es la única verdad.
-        let camDelay = max(0, -src.offsetSeconds)
-        let scrDelay = max(0, src.offsetSeconds)
+        // Con una sola fuente el desfase no aplica.
+        let both = screenTrack != nil && cameraTrack != nil
+        let camDelay = both ? max(0, -src.offsetSeconds) : 0
+        let scrDelay = both ? max(0, src.offsetSeconds) : 0
+        let screenDur = try await screenAsset?.load(.duration).seconds ?? .infinity
+        let cameraDur = try await cameraAsset?.load(.duration).seconds ?? .infinity
         let usable = min(screenDur - scrDelay, cameraDur - camDelay)
         guard usable > 0.1 else {
             throw NSError(domain: "CompositionBuilder", code: 2, userInfo: [
@@ -294,17 +433,27 @@ enum CompositionBuilder {
         }
         let duration = CMTime(seconds: usable, preferredTimescale: 600)
 
-        let vScreen = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
-        try vScreen.insertTimeRange(
-            CMTimeRange(start: CMTime(seconds: scrDelay, preferredTimescale: 600), duration: duration),
-            of: screenTrack, at: .zero)
-        let vCamera = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
-        try vCamera.insertTimeRange(
-            CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),
-            of: cameraTrack, at: .zero)
+        var screenID = kCMPersistentTrackID_Invalid
+        if let screenTrack {
+            let vScreen = comp.addMutableTrack(withMediaType: .video,
+                                               preferredTrackID: kCMPersistentTrackID_Invalid)!
+            try vScreen.insertTimeRange(
+                CMTimeRange(start: CMTime(seconds: scrDelay, preferredTimescale: 600), duration: duration),
+                of: screenTrack, at: .zero)
+            screenID = vScreen.trackID
+        }
+        var cameraID = kCMPersistentTrackID_Invalid
+        if let cameraTrack {
+            let vCamera = comp.addMutableTrack(withMediaType: .video,
+                                               preferredTrackID: kCMPersistentTrackID_Invalid)!
+            try vCamera.insertTimeRange(
+                CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),
+                of: cameraTrack, at: .zero)
+            cameraID = vCamera.trackID
+        }
 
         // El audio vive en el archivo de cámara.
-        if let audio = try await cameraAsset.loadTracks(withMediaType: .audio).first {
+        if let audio = try await cameraAsset?.loadTracks(withMediaType: .audio).first {
             let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
             try aTrack.insertTimeRange(
                 CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),
@@ -317,8 +466,8 @@ enum CompositionBuilder {
         video.frameDuration = CMTime(value: 1, timescale: 30)
         video.instructions = [PiPInstruction(
             timeRange: CMTimeRange(start: .zero, duration: duration),
-            screenTrack: vScreen.trackID, cameraTrack: vCamera.trackID)]
-        return (comp, video)
+            screenTrack: screenID, cameraTrack: cameraID)]
+        return (comp, video, usable)
     }
 }
 
@@ -327,16 +476,18 @@ enum CompositionBuilder {
 enum CompositionExporter {
 
     // Passthrough ignora la videoComposition EN SILENCIO: jamás se ofrece.
+    // Devuelve la sesión para poder CANCELAR (al cerrar la ventana, p. ej.).
+    @discardableResult
     static func export(composition: AVMutableComposition,
                        video: AVMutableVideoComposition,
                        to url: URL,
                        progress: @escaping (Double) -> Void,
-                       done: @escaping (Result<URL, Error>) -> Void) {
+                       done: @escaping (Result<URL, Error>) -> Void) -> AVAssetExportSession? {
         guard let session = AVAssetExportSession(asset: composition,
                                                  presetName: AVAssetExportPresetHighestQuality) else {
             done(.failure(NSError(domain: "CompositionExporter", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "No se pudo crear la sesión de exportación"])))
-            return
+            return nil
         }
         session.videoComposition = video
         session.outputURL = url
@@ -359,5 +510,6 @@ enum CompositionExporter {
                 }
             }
         }
+        return session
     }
 }

@@ -40,9 +40,12 @@ final class RemoteControl: ObservableObject {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
-    // Renueva el código: invalida al instante cualquier dispositivo conectado.
+    // Renueva el código: invalida al instante cualquier dispositivo conectado,
+    // incluidos los teléfonos con el canal del karaoke abierto (el apretón de
+    // manos del canal solo se valida al conectar).
     func regenerateToken() {
         Settings.set(Self.newToken(), .remoteToken)
+        closeMirrorClients()
         objectWillChange.send()
     }
 
@@ -259,7 +262,11 @@ final class RemoteControl: ObservableObject {
             }
             return httpResponse(status: "200 OK", body: "ok", type: "text/plain")
         case "/script":
-            return httpResponse(status: "200 OK", body: RemoteMirror.scriptJSON(),
+            // El guion vive en el hilo principal; leerlo desde la cola de red
+            // sin cruzar es una carrera de datos (igual que /status).
+            var scriptBody = "{}"
+            DispatchQueue.main.sync { scriptBody = RemoteMirror.scriptJSON() }
+            return httpResponse(status: "200 OK", body: scriptBody,
                                 type: "application/json")
         case "/status":
             let m = PrompterModel.shared

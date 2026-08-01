@@ -1,6 +1,6 @@
 # Plan de implementación — Avatar digital de Alberto en BtoPrompter
 
-**Fecha:** 1 de agosto de 2026 · **Repo:** `/Users/bto/Developer/BtoPrompter` · **Estado del repo:** 38 archivos Swift, ~7.300 líneas, 4 capas (`App` / `Core` / `Storage` / `UI`), compilación con `swiftc` desde `build.sh`, firma ad-hoc.
+**Fecha:** 1 de agosto de 2026 · **Repo:** `<repo>` · **Estado del repo:** 38 archivos Swift, ~7.300 líneas, 4 capas (`App` / `Core` / `Storage` / `UI`), compilación con `swiftc` desde `build.sh`, firma ad-hoc.
 
 ---
 

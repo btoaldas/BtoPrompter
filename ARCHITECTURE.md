@@ -16,6 +16,17 @@ Sources/
 ├── Core/           Lógica de negocio ("backend")
 │   ├── PrompterEngine.swift  PrompterModel: estado, transporte, karaoke,
 │   │                         orquestación del Ensayo IA
+│   ├── RemoteControl.swift   Servidor HTTP local del remoto (token 128 bits,
+│   │                         comparación en tiempo constante) + canal SSE
+│   ├── RemoteMirror.swift    El guion y el estado en JSON para el teléfono
+│   ├── RemoteInput.swift     Teclas/ratón sintéticos (control del ordenador)
+│   ├── RecordingEngine.swift Grabación cámara+pantalla sincronizadas
+│   │                         (centinela de primer fotograma, sidecar sync.json)
+│   ├── VideoProjectModel.swift  Proyecto del editor: tramos, recortes, fondos.
+│   │                         Funciones puras probadas en --selftest
+│   ├── VideoComposer.swift   PiPCompositor (AVVideoCompositing + Core Image),
+│   │                         FrameComposer (dibujo único preview=export),
+│   │                         CompositionBuilder y CompositionExporter
 │   ├── ScriptParser.swift    Texto/Markdown → [Chunk] (función pura, testeable)
 │   ├── AIRehearsal.swift     Cliente de APIs estilo OpenAI + prompt de ritmo
 │   ├── Importers.swift       txt/md, pptx (unzip + XML), audio (Speech)
@@ -43,6 +54,9 @@ Sources/
     ├── EditorPane.swift      Edición del discurso
     ├── AISheet.swift         Configuración del Ensayo IA
     ├── PrompterView.swift    Karaoke, progreso, controles
+    ├── VideoEditorWindow.swift  Editor de composición: timeline de tramos,
+    │                         inspector por componentes, exportación
+    ├── RecordingSettingsTab.swift  Ajustes de grabación y editor
     └── Components.swift      Piezas reutilizables
 ```
 
@@ -77,6 +91,9 @@ Sources/
 | Nuevo parámetro global         | `Storage/Settings.swift` (clave + default) |
 | Nueva marca de sintaxis        | `Core/ScriptParser.swift` + SelfTest       |
 | Nueva vista o control          | `UI/` (usar `Theme` y `Components`)        |
+| Nuevo modo de composición      | `SegmentLayout.Mode` + un caso en `FrameComposer.compose` |
+| Nuevo tipo de fondo del editor | `BackgroundStyle` + un caso en `FrameComposer.backgroundImage` |
+| Nuevo control por tramo        | Una sección en `SegmentInspector` (no toca el reproductor) |
 
 Antes de commitear: `./build.sh && dist/BtoPrompter.app/Contents/MacOS/BtoPrompter --selftest`
 

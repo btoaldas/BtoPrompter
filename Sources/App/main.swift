@@ -44,16 +44,24 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
         exit(1)
     }
     print("desfase aplicado: \(Int(sources.offsetSeconds * 1000)) ms")
-    if CommandLine.arguments.count > i + 3,
-       let idx = Int(CommandLine.arguments[i + 3]),
-       idx >= 0, idx < CompositionLayout.presets.count {
-        CompositionParameters.shared.layout = CompositionLayout.presets[idx].layout
-        print("preset: \(CompositionLayout.presets[idx].name)")
-    }
     let sem = DispatchSemaphore(value: 0)
     Task {
         do {
             let built = try await CompositionBuilder.build(sources)
+            // El proyecto sale de project.json si existe; el tercer argumento
+            // opcional (índice de preset) monta un proyecto de un solo tramo.
+            var project = VideoProjectStore.load(folder: folder, duration: built.duration)
+            if CommandLine.arguments.count > i + 3,
+               let idx = Int(CommandLine.arguments[i + 3]),
+               idx >= 0, idx < SegmentLayout.presets.count {
+                project = VideoProject()
+                project.duration = built.duration
+                project.layouts = [SegmentLayout.presets[idx].layout]
+                print("preset: \(SegmentLayout.presets[idx].name)")
+            } else {
+                print("tramos: \(project.layouts.count) (cortes en \(project.cuts))")
+            }
+            CompositionParameters.shared.project = project.sanitized()
             CompositionExporter.export(composition: built.composition, video: built.video,
                                        to: out, progress: { _ in }) { result in
                 switch result {

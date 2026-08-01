@@ -1,0 +1,284 @@
+import Foundation
+import CoreGraphics
+
+// Modelo del proyecto de composición: QUÉ se ve en cada tramo de tiempo.
+// Funciones puras y serializable a project.json junto a los .mov — el dibujo
+// vive en el compositor; aquí no se importa ningún framework de vídeo.
+//
+// Reglas de diseño (pensadas para crecer):
+// - Se guardan solo los PUNTOS de corte, nunca rangos: es imposible crear un
+//   hueco o un solape por construcción. layouts.count == cuts.count + 1.
+// - Todo va normalizado 0..1 con origen ARRIBA-izquierda (como piensa la
+//   gente); el compositor convierte a coordenadas de Core Image en UN lugar.
+// - Cada pieza nueva (fondo, recorte, ratio…) es un tipo aparte con su valor
+//   por defecto: añadir la siguiente no toca las existentes.
+
+// MARK: - Piezas
+
+// Cómo entra la imagen de una fuente en su ventana.
+enum SourceFit: String, Codable, CaseIterable {
+    case fill     // cubre la ventana y recorta el sobrante (por defecto)
+    case fit      // encaja entera, pueden quedar franjas
+    case crop     // usa el rectángulo de recorte elegido por el usuario
+}
+
+// Recorte manual de una fuente: qué parte del fotograma original se usa.
+// Normalizado 0..1 sobre la imagen fuente, origen arriba-izquierda.
+struct SourceCrop: Codable, Equatable {
+    var x: Double = 0
+    var y: Double = 0
+    var width: Double = 1
+    var height: Double = 1
+
+    var isFull: Bool { x == 0 && y == 0 && width == 1 && height == 1 }
+
+    // El recorte jamás sale de la imagen ni queda degenerado.
+    func clamped() -> SourceCrop {
+        var c = SourceCrop()
+        c.width = min(1, max(0.05, width))
+        c.height = min(1, max(0.05, height))
+        c.x = min(1 - c.width, max(0, x))
+        c.y = min(1 - c.height, max(0, y))
+        return c
+    }
+}
+
+// Ajustes de una fuente dentro de un tramo (cámara o pantalla por igual).
+struct SourceSettings: Codable, Equatable {
+    var fit: SourceFit = .fill
+    var crop = SourceCrop()
+}
+
+// Fondo del lienzo. Un caso nuevo = una función nueva en el compositor.
+enum BackgroundStyle: Codable, Equatable {
+    case color(RGBA)
+    case gradient(top: RGBA, bottom: RGBA)
+    case image(path: String, mode: ImageMode)
+
+    enum ImageMode: String, Codable, CaseIterable {
+        case fill      // expandido: cubre todo, recorta el sobrante
+        case fit       // adaptado: entero, con franjas del color de respaldo
+        case stretch   // estirado a la fuerza
+        case tile      // mosaico
+        case center    // tamaño original, centrado
+    }
+
+    static let `default` = BackgroundStyle.color(RGBA(r: 0.07, g: 0.09, b: 0.13))
+}
+
+struct RGBA: Codable, Equatable {
+    var r: Double
+    var g: Double
+    var b: Double
+    var a: Double = 1
+}
+
+// MARK: - El tramo
+
+// La receta completa de un tramo de tiempo.
+struct SegmentLayout: Codable, Equatable {
+    enum Mode: String, Codable, CaseIterable {
+        case overlay      // cámara flotando sobre la pantalla
+        case sideBySide   // las dos fuentes una junto a otra
+        case onlyScreen
+        case onlyCamera
+    }
+    enum Shape: String, Codable, CaseIterable {
+        case rect, rounded, circle
+    }
+
+    var mode: Mode = .overlay
+    // Ventana de la cámara en modo overlay (normalizada, origen arriba-izq).
+    var camRect = NRect(x: 0.72, y: 0.62, width: 0.25, height: 0.34)
+    var shape: Shape = .circle
+    var borderWidth: Double = 0.012   // fracción del lado menor del lienzo
+    // Reparto del lado a lado: fracción del ancho para la CÁMARA (0.2–0.8).
+    var splitRatio: Double = 0.5
+    var camera = SourceSettings()
+    var screen = SourceSettings()
+
+    func sanitized() -> SegmentLayout {
+        var l = self
+        l.splitRatio = min(0.8, max(0.2, l.splitRatio))
+        l.camRect = l.camRect.clamped(minSide: 0.06)
+        l.borderWidth = min(0.05, max(0, l.borderWidth))
+        l.camera.crop = l.camera.crop.clamped()
+        l.screen.crop = l.screen.crop.clamped()
+        return l
+    }
+}
+
+// CGRect no es Codable de fábrica; este sí, y con las operaciones que se usan.
+struct NRect: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+
+    var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+
+    func clamped(minSide: Double) -> NRect {
+        var r = self
+        r.width = min(1, max(minSide, r.width))
+        r.height = min(1, max(minSide, r.height))
+        r.x = min(1 - r.width, max(0, r.x))
+        r.y = min(1 - r.height, max(0, r.y))
+        return r
+    }
+}
+
+// MARK: - El proyecto
+
+struct VideoProject: Codable, Equatable {
+    var cuts: [Double] = []                        // segundos, ordenados, únicos
+    var layouts: [SegmentLayout] = [SegmentLayout()]
+    var background: BackgroundStyle = .default
+    var duration: Double = 0                       // de la composición ya recortada
+
+    // Invariante: layouts.count == cuts.count + 1. Todo lo que muta pasa por
+    // estas operaciones; no hay forma de crear huecos ni desajustes.
+
+    // Tramo vigente en un instante dado.
+    func segmentIndex(at seconds: Double) -> Int {
+        var idx = 0
+        for cut in cuts where seconds >= cut { idx += 1 }
+        return min(idx, layouts.count - 1)
+    }
+
+    func layout(at seconds: Double) -> SegmentLayout {
+        layouts[segmentIndex(at: seconds)]
+    }
+
+    // Rango [inicio, fin) del tramo i.
+    func segmentRange(_ i: Int) -> (start: Double, end: Double) {
+        let start = i == 0 ? 0 : cuts[i - 1]
+        let end = i < cuts.count ? cuts[i] : duration
+        return (start, end)
+    }
+
+    // Corta en el instante dado: el tramo se parte en dos con la misma receta.
+    // Devuelve el índice del tramo nuevo, o nil si el corte no vale.
+    mutating func addCut(at seconds: Double, minGap: Double = 0.2) -> Int? {
+        guard seconds > minGap, seconds < duration - minGap else { return nil }
+        guard !cuts.contains(where: { abs($0 - seconds) < minGap }) else { return nil }
+        let segment = segmentIndex(at: seconds)
+        let insertAt = cuts.firstIndex(where: { $0 > seconds }) ?? cuts.count
+        cuts.insert(seconds, at: insertAt)
+        layouts.insert(layouts[segment], at: segment + 1)
+        return segment + 1
+    }
+
+    // Borrar un tramo = fusionarlo con el anterior (o el siguiente si es el
+    // primero). Nunca queda hueco, por construcción.
+    mutating func removeSegment(_ i: Int) {
+        guard layouts.count > 1, i >= 0, i < layouts.count else { return }
+        if i == 0 {
+            cuts.removeFirst()
+            layouts.removeFirst()
+        } else {
+            cuts.remove(at: i - 1)
+            layouts.remove(at: i)
+        }
+    }
+
+    // Mover un corte sin invadir a los vecinos.
+    mutating func moveCut(_ i: Int, to seconds: Double, minGap: Double = 0.2) {
+        guard i >= 0, i < cuts.count else { return }
+        let lower = (i == 0 ? 0 : cuts[i - 1]) + minGap
+        let upper = (i == cuts.count - 1 ? duration : cuts[i + 1]) - minGap
+        guard lower < upper else { return }
+        cuts[i] = min(upper, max(lower, seconds))
+    }
+
+    // Un tramo por capítulo del guion (capitulos.txt del grabador).
+    mutating func applyChapterCuts(_ chapterSeconds: [Double]) {
+        for s in chapterSeconds.sorted() {
+            _ = addCut(at: s)
+        }
+    }
+
+    func sanitized() -> VideoProject {
+        var p = self
+        // duration <= 0 significa "aún no se conoce": los cortes se conservan.
+        // Filtrarlos aquí destruía el proyecto guardado al reabrir el editor,
+        // que carga primero y conoce la duración después.
+        p.cuts = Array(Set(p.cuts)).sorted()
+            .filter { $0 > 0 && (p.duration <= 0 || $0 < p.duration) }
+        // Reparar el invariante si el JSON venía mal de fuera.
+        while p.layouts.count < p.cuts.count + 1 { p.layouts.append(p.layouts.last ?? SegmentLayout()) }
+        while p.layouts.count > p.cuts.count + 1 { p.layouts.removeLast() }
+        p.layouts = p.layouts.map { $0.sanitized() }
+        return p
+    }
+}
+
+// MARK: - Persistencia
+
+enum VideoProjectStore {
+
+    static func projectURL(inFolder folder: URL) -> URL {
+        folder.appendingPathComponent("project.json")
+    }
+
+    static func load(folder: URL, duration: Double) -> VideoProject {
+        guard let data = try? Data(contentsOf: projectURL(inFolder: folder)),
+              var p = try? JSONDecoder().decode(VideoProject.self, from: data) else {
+            var fresh = VideoProject()
+            fresh.duration = duration
+            return fresh
+        }
+        p.duration = duration
+        return p.sanitized()
+    }
+
+    static func save(_ project: VideoProject, folder: URL) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(project.sanitized()) else { return }
+        try? data.write(to: projectURL(inFolder: folder), options: .atomic)
+    }
+
+    // Lee capitulos.txt ("HH:MM:SS  título") → segundos de cada capítulo.
+    static func chapterSeconds(inFolder folder: URL) -> [Double] {
+        guard let text = try? String(contentsOf: folder.appendingPathComponent("capitulos.txt"),
+                                     encoding: .utf8) else { return [] }
+        var result: [Double] = []
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard let stamp = parts.first, stamp.contains(":") else { continue }
+            let comps = stamp.split(separator: ":").compactMap { Double($0) }
+            guard comps.count == 3 else { continue }
+            result.append(comps[0] * 3600 + comps[1] * 60 + comps[2])
+        }
+        return result
+    }
+}
+
+// MARK: - Presets (una receta con nombre)
+
+extension SegmentLayout {
+    static let presets: [(name: String, layout: SegmentLayout)] = [
+        ("Solo pantalla", SegmentLayout(mode: .onlyScreen)),
+        ("Cara en círculo", SegmentLayout()),
+        ("Lado a lado", {
+            var l = SegmentLayout()
+            l.mode = .sideBySide
+            l.shape = .rounded
+            return l
+        }()),
+        ("Solo cámara", SegmentLayout(mode: .onlyCamera)),
+        ("Cara grande", {
+            var l = SegmentLayout()
+            l.mode = .sideBySide
+            l.shape = .rounded
+            l.splitRatio = 0.65
+            return l
+        }()),
+        ("Esquina sup. izq.", {
+            var l = SegmentLayout()
+            l.camRect = NRect(x: 0.03, y: 0.05, width: 0.25, height: 0.34)
+            l.shape = .rounded
+            return l
+        }()),
+    ]
+}

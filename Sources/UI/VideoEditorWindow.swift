@@ -2,12 +2,15 @@ import AppKit
 import AVFoundation
 import AVKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Editor de composición: junta la cámara y la pantalla de una grabación en un
-// vídeo publicable. Presets con un clic, previsualización real (el mismo
-// compositor que exporta) y botón de exportar. Se crea BAJO DEMANDA: con la
-// función apagada esta ventana no existe.
+// vídeo publicable, por TRAMOS de tiempo — del segundo A al B la cara en
+// círculo abajo a la derecha, del B al C lado a lado 30/70, etc.
+// Previsualización real (el mismo compositor que exporta), proyecto guardado
+// en project.json junto a los .mov, y exportar MP4.
 //
+// Se crea BAJO DEMANDA: con la función apagada esta ventana no existe.
 // OJO: esta ventana SÍ se ve al compartir pantalla. Es un editor, no el
 // teleprompter; la invisibilidad es del PrompterPanel y de nadie más.
 
@@ -23,14 +26,14 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         let target = folder ?? Self.latestRecordingFolder()
         guard let target, let sources = CompositionBuilder.sources(inFolder: target) else {
             let alert = NSAlert()
-            alert.messageText = "No hay ninguna grabación completa"
-            alert.informativeText = "El editor necesita una carpeta con cámara Y pantalla "
-                + "(dos archivos .mov). Graba con ambas activadas en Ajustes → Grabación."
+            alert.messageText = "No hay ninguna grabación que componer"
+            alert.informativeText = "El editor necesita una carpeta de grabación con al menos "
+                + "un archivo de cámara o de pantalla. Graba primero desde Ajustes → Grabación."
             alert.runModal()
             return
         }
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 700),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.title = "Componer grabación"
@@ -39,6 +42,7 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             w.isReleasedWhenClosed = false
             window = w
         }
+        window?.title = "Componer grabación — \(target.lastPathComponent)"
         window?.contentView = NSHostingView(rootView: VideoEditorView(sources: sources, folder: target))
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -62,72 +66,208 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     }
 }
 
+// MARK: - Estado observable del proyecto
+
+// Un solo dueño del proyecto: cada cambio pasa por aquí, va a la caja del
+// compositor (fotograma siguiente ya sale nuevo) y se guarda a disco.
+@MainActor
+final class VideoProjectState: ObservableObject {
+    @Published var project: VideoProject {
+        didSet {
+            // Al compositor de inmediato (preview en vivo); al disco con
+            // calma: un arrastre de slider son decenas de cambios por segundo
+            // y escribir JSON en cada uno castiga el disco sin necesidad.
+            CompositionParameters.shared.project = project
+            scheduleSave()
+            onChange?()
+        }
+    }
+
+    private var saveWork: DispatchWorkItem?
+
+    private func scheduleSave() {
+        saveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            VideoProjectStore.save(self.project, folder: self.folder)
+        }
+        saveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    // Guardado inmediato: al cerrar la ventana y antes de exportar.
+    func flushSave() {
+        saveWork?.cancel()
+        saveWork = nil
+        VideoProjectStore.save(project, folder: folder)
+    }
+    @Published var selectedSegment = 0
+    let folder: URL
+    var onChange: (() -> Void)?
+
+    init(folder: URL, duration: Double) {
+        self.folder = folder
+        var p = VideoProjectStore.load(folder: folder, duration: duration)
+        p.duration = duration
+        project = p.sanitized()
+        CompositionParameters.shared.project = project
+    }
+
+    var selectedLayout: SegmentLayout {
+        get {
+            let i = min(selectedSegment, project.layouts.count - 1)
+            return project.layouts[max(0, i)]
+        }
+        set {
+            let i = min(selectedSegment, project.layouts.count - 1)
+            guard i >= 0 else { return }
+            project.layouts[i] = newValue.sanitized()
+        }
+    }
+
+    func cut(at seconds: Double) {
+        var p = project
+        if let newIndex = p.addCut(at: seconds) {
+            project = p
+            selectedSegment = newIndex
+        }
+    }
+
+    func removeSelected() {
+        var p = project
+        p.removeSegment(selectedSegment)
+        project = p
+        selectedSegment = max(0, min(selectedSegment - 1, p.layouts.count - 1))
+    }
+
+    func applyChapters() {
+        let seconds = VideoProjectStore.chapterSeconds(inFolder: folder)
+        guard !seconds.isEmpty else { return }
+        var p = project
+        p.applyChapterCuts(seconds)
+        project = p
+    }
+
+    var hasChapters: Bool {
+        !VideoProjectStore.chapterSeconds(inFolder: folder).isEmpty
+    }
+}
+
+// MARK: - Vista raíz
+
 struct VideoEditorView: View {
     let sources: CompositionBuilder.Sources
     let folder: URL
 
+    @StateObject private var state: VideoProjectState
     @State private var player: AVPlayer? = nil
     @State private var status: String? = nil
-    @State private var selectedPreset = 1
     @State private var exporting = false
     @State private var exportProgress = 0.0
+    @State private var exportError: String? = nil
+    @State private var exportSession: AVAssetExportSession? = nil
     @State private var composition: AVMutableComposition? = nil
     @State private var videoComposition: AVMutableVideoComposition? = nil
+    @State private var playhead: Double = 0
+    @State private var timeObserver: Any? = nil
+
+    init(sources: CompositionBuilder.Sources, folder: URL) {
+        self.sources = sources
+        self.folder = folder
+        _state = StateObject(wrappedValue: VideoProjectState(folder: folder, duration: 0))
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let player {
-                EditorPlayerSurface(player: player)
-                    .background(Color.black)
-            } else {
-                ZStack {
-                    Color.black
-                    if let status {
-                        Text(status).foregroundStyle(.orange)
-                    } else {
-                        ProgressView("Preparando la composición…")
-                    }
-                }
-            }
-
-            HStack(spacing: 10) {
-                ForEach(Array(CompositionLayout.presets.enumerated()), id: \.offset) { i, preset in
-                    Button(action: { apply(i) }) {
-                        Text("\(i + 1) · \(preset.name)")
-                            .font(.system(size: 12, weight: selectedPreset == i ? .bold : .regular))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(selectedPreset == i ? .accentColor : .secondary)
-                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
-                }
-                Spacer()
-                if exporting {
-                    ProgressView(value: exportProgress)
-                        .frame(width: 140)
-                    Text("\(Int(exportProgress * 100)) %").monospacedDigit()
+        HSplitView {
+            VStack(spacing: 0) {
+                if let player {
+                    EditorPlayerSurface(player: player)
+                        .background(Color.black)
+                        .layoutPriority(1)
                 } else {
-                    Button("Exportar…") { exportVideo() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(composition == nil)
+                    ZStack {
+                        Color.black
+                        if let status {
+                            Text(status).foregroundStyle(.orange).padding()
+                        } else {
+                            ProgressView("Preparando la composición…")
+                        }
+                    }
+                    .layoutPriority(1)
                 }
-            }
-            .padding(12)
-            .background(.regularMaterial)
 
-            Text("El desfase entre cámara y pantalla ya está corregido "
-                 + "(\(Int(abs(sources.offsetSeconds * 1000))) ms, medido al grabar). "
-                 + "Esta ventana SÍ aparece al compartir pantalla: es un editor, no el teleprompter.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                TimelineStrip(state: state, playhead: $playhead) { seconds in
+                    seek(to: seconds)
+                }
+                .frame(height: 74)
                 .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.vertical, 8)
+
+                bottomBar
+            }
+            .frame(minWidth: 640)
+
+            SegmentInspector(state: state, refresh: { refreshPausedFrame() })
+                .frame(minWidth: 300, maxWidth: 360)
         }
-        .frame(minWidth: 860, minHeight: 560)
+        .frame(minWidth: 980, minHeight: 640)
         .task { await prepare() }
         .onDisappear {
+            if let obs = timeObserver { player?.removeTimeObserver(obs) }
+            timeObserver = nil
             player?.pause()
             player = nil
+            // Cerrar con una exportación en marcha la cancela con claridad,
+            // en vez de dejarla huérfana escribiendo sin dueño.
+            exportSession?.cancelExport()
+            exportSession = nil
+            CompositionParameters.shared.exportProject = nil
+            state.flushSave()
         }
+    }
+
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            Button(action: { state.cut(at: playhead) }) {
+                Label("Cortar aquí", systemImage: "scissors")
+            }
+            .keyboardShortcut("s", modifiers: [])
+            .help("Parte el tramo bajo el cursor en dos (tecla S)")
+            .disabled(player == nil)
+
+            Button(action: { state.removeSelected() }) {
+                Label("Fusionar tramo", systemImage: "arrow.triangle.merge")
+            }
+            .help("Elimina el tramo seleccionado fusionándolo con el anterior")
+            .disabled(state.project.layouts.count < 2)
+
+            if state.hasChapters {
+                Button(action: { state.applyChapters() }) {
+                    Label("Un tramo por capítulo", systemImage: "book")
+                }
+                .help("Genera un corte en cada capítulo del guion (capitulos.txt)")
+            }
+
+            Spacer()
+
+            if let exportError {
+                Text(exportError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .frame(maxWidth: 320)
+            }
+            if exporting {
+                ProgressView(value: exportProgress).frame(width: 140)
+                Text("\(Int(exportProgress * 100)) %").monospacedDigit()
+            } else {
+                Button("Exportar…") { exportVideo() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(composition == nil)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial)
     }
 
     private func prepare() async {
@@ -135,50 +275,476 @@ struct VideoEditorView: View {
             let built = try await CompositionBuilder.build(sources)
             composition = built.composition
             videoComposition = built.video
-            apply(selectedPreset)
+            // El proyecto se RECARGA de disco ahora que la duración es real:
+            // cargarlo antes con duración 0 y sanearlo destruía los cortes
+            // guardados (y el didSet persistía la destrucción).
+            state.project = VideoProjectStore.load(folder: folder, duration: built.duration)
+            state.onChange = { refreshPausedFrame() }
+
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.video
-            let p = AVPlayer(playerItem: item)
-            player = p
+            let p2 = AVPlayer(playerItem: item)
+            timeObserver = p2.addPeriodicTimeObserver(
+                forInterval: CMTime(value: 1, timescale: 10), queue: .main
+            ) { t in
+                Task { @MainActor in
+                    // Solo mueve el cursor. La SELECCIÓN es del usuario: si el
+                    // observador la pisara cada décima, editar un tramo con la
+                    // reproducción en marcha sería imposible (los controles
+                    // cambiarían de tramo bajo las manos).
+                    playhead = t.seconds
+                }
+            }
+            player = p2
         } catch {
             status = error.localizedDescription
         }
     }
 
-    private func apply(_ index: Int) {
-        selectedPreset = index
-        CompositionParameters.shared.layout = CompositionLayout.presets[index].layout
-        // En pausa el fotograma no se refresca solo: se fuerza un redibujado.
-        if let p = player, p.rate == 0 {
-            let t = p.currentTime()
-            p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-        }
+    // En pausa el fotograma no se refresca solo: se fuerza un redibujado.
+    private func refreshPausedFrame() {
+        guard let p = player, p.rate == 0 else { return }
+        let t = p.currentTime()
+        p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func seek(to seconds: Double) {
+        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                     toleranceBefore: .zero, toleranceAfter: .zero)
+        playhead = seconds
+        state.selectedSegment = state.project.segmentIndex(at: seconds)
     }
 
     private func exportVideo() {
-        guard let composition, let videoComposition else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.mpeg4Movie]
         panel.nameFieldStringValue = "montaje-\(folder.lastPathComponent).mp4"
         panel.directoryURL = folder
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        state.flushSave()
         exporting = true
         exportProgress = 0
-        CompositionExporter.export(composition: composition, video: videoComposition,
-                                   to: url, progress: { exportProgress = $0 }) { result in
-            exporting = false
-            switch result {
-            case .success(let out):
-                NSWorkspace.shared.activateFileViewerSelecting([out])
-            case .failure(let error):
-                status = error.localizedDescription
+        exportError = nil
+        // La exportación lee una copia CONGELADA del proyecto: seguir moviendo
+        // sliders mientras exporta no contamina el archivo. Y usa su propia
+        // composición, así el reproductor no compite por los decodificadores.
+        CompositionParameters.shared.exportProject = state.project
+        Task {
+            do {
+                let built = try await CompositionBuilder.build(sources)
+                built.video.customVideoCompositorClass = ExportCompositor.self
+                exportSession = CompositionExporter.export(
+                    composition: built.composition, video: built.video,
+                    to: url, progress: { exportProgress = $0 }) { result in
+                    exporting = false
+                    exportSession = nil
+                    CompositionParameters.shared.exportProject = nil
+                    switch result {
+                    case .success(let out):
+                        NSWorkspace.shared.activateFileViewerSelecting([out])
+                    case .failure(let error):
+                        exportError = error.localizedDescription
+                    }
+                }
+            } catch {
+                exporting = false
+                CompositionParameters.shared.exportProject = nil
+                exportError = error.localizedDescription
             }
         }
     }
 }
 
+// MARK: - Línea de tiempo
+
+// Tira de tramos: cada bloque es un tramo con su modo; clic selecciona y
+// mueve el cursor a su inicio; clic en la regla mueve solo el cursor.
+struct TimelineStrip: View {
+    @ObservedObject var state: VideoProjectState
+    @Binding var playhead: Double
+    let onSeek: (Double) -> Void
+
+    private func modeLabel(_ m: SegmentLayout.Mode) -> String {
+        switch m {
+        case .overlay: return "◉ Círculo"
+        case .sideBySide: return "◫ Lado a lado"
+        case .onlyScreen: return "🖥 Pantalla"
+        case .onlyCamera: return "🎥 Cámara"
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let duration = max(0.001, state.project.duration)
+            let w = geo.size.width
+
+            VStack(spacing: 3) {
+                // Bloques de tramos.
+                HStack(spacing: 1) {
+                    ForEach(0..<state.project.layouts.count, id: \.self) { i in
+                        let range = state.project.segmentRange(i)
+                        let frac = max(0.001, (range.end - range.start) / duration)
+                        let selected = i == state.selectedSegment
+                        Text(modeLabel(state.project.layouts[i].mode))
+                            .font(.system(size: 10, weight: selected ? .bold : .regular))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .frame(width: max(2, w * frac - 1), height: 34)
+                            .background(selected ? Color.accentColor.opacity(0.85)
+                                                 : Color.gray.opacity(0.35))
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .onTapGesture {
+                                state.selectedSegment = i
+                                onSeek(range.start + 0.01)
+                            }
+                    }
+                }
+
+                // Regla con el cursor: clic o arrastre mueven la reproducción.
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(height: 18)
+                    // Marcas de corte.
+                    ForEach(state.project.cuts, id: \.self) { cut in
+                        Rectangle()
+                            .fill(Color.orange)
+                            .frame(width: 2, height: 18)
+                            .offset(x: w * cut / duration)
+                    }
+                    // Cursor.
+                    Rectangle()
+                        .fill(Color.red)
+                        .frame(width: 2, height: 18)
+                        .offset(x: w * min(1, max(0, playhead / duration)))
+                    Text(timeString(playhead) + " / " + timeString(duration))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 6)
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                    let s = min(duration, max(0, Double(g.location.x / w) * duration))
+                    onSeek(s)
+                })
+            }
+        }
+    }
+
+    private func timeString(_ s: Double) -> String {
+        let t = Int(s)
+        return String(format: "%d:%02d", t / 60, t % 60)
+    }
+}
+
+// MARK: - Inspector del tramo
+
+// Todo lo editable del tramo seleccionado, agrupado por componentes. Añadir
+// un control nuevo = añadir una sección; nada de esto toca el reproductor.
+struct SegmentInspector: View {
+    @ObservedObject var state: VideoProjectState
+    let refresh: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                let range = state.project.segmentRange(state.selectedSegment)
+                Text("Tramo \(state.selectedSegment + 1) de \(state.project.layouts.count)"
+                     + String(format: "  ·  %.1f – %.1f s", range.start, range.end))
+                    .font(.headline)
+
+                presetRow
+                modeSection
+
+                if state.selectedLayout.mode == .overlay {
+                    overlaySection
+                }
+                if state.selectedLayout.mode == .sideBySide {
+                    splitSection
+                }
+                if state.selectedLayout.mode != .onlyScreen {
+                    sourceSection(title: "Cámara", keyPath: \.camera)
+                }
+                if state.selectedLayout.mode != .onlyCamera {
+                    sourceSection(title: "Pantalla", keyPath: \.screen)
+                }
+                shapeSection
+                backgroundSection
+            }
+            .padding(14)
+        }
+        .background(.regularMaterial)
+    }
+
+    // Preset = receta completa aplicada al tramo seleccionado (teclas 1–6).
+    private var presetRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Presets").font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                ForEach(Array(SegmentLayout.presets.enumerated()), id: \.offset) { i, preset in
+                    Button("\(i + 1) · \(preset.name)") {
+                        state.selectedLayout = preset.layout
+                    }
+                    .font(.system(size: 11))
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [])
+                }
+            }
+        }
+    }
+
+    private var modeSection: some View {
+        Picker("Modo", selection: Binding(
+            get: { state.selectedLayout.mode },
+            set: { var l = state.selectedLayout; l.mode = $0; state.selectedLayout = l }
+        )) {
+            Text("Cámara sobre pantalla").tag(SegmentLayout.Mode.overlay)
+            Text("Lado a lado").tag(SegmentLayout.Mode.sideBySide)
+            Text("Solo pantalla").tag(SegmentLayout.Mode.onlyScreen)
+            Text("Solo cámara").tag(SegmentLayout.Mode.onlyCamera)
+        }
+        .pickerStyle(.menu)
+    }
+
+    // Posición y tamaño de la cámara flotante.
+    private var overlaySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Posición de la cámara").font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 4) {
+                positionButton("↖", x: 0.03, y: 0.05)
+                positionButton("↑", x: 0.375, y: 0.05)
+                positionButton("↗", x: 0.72, y: 0.05)
+                positionButton("←", x: 0.03, y: 0.33)
+                positionButton("·", x: 0.375, y: 0.33)
+                positionButton("→", x: 0.72, y: 0.33)
+                positionButton("↙", x: 0.03, y: 0.62)
+                positionButton("↓", x: 0.375, y: 0.62)
+                positionButton("↘", x: 0.72, y: 0.62)
+            }
+            slider("Tamaño", value: Binding(
+                get: { state.selectedLayout.camRect.width },
+                set: { v in
+                    var l = state.selectedLayout
+                    let cx = l.camRect.x + l.camRect.width / 2
+                    let cy = l.camRect.y + l.camRect.height / 2
+                    l.camRect.width = v
+                    l.camRect.height = v * 1.36    // proporción original del preset
+                    l.camRect.x = cx - v / 2
+                    l.camRect.y = cy - v * 1.36 / 2
+                    state.selectedLayout = l
+                }), in: 0.08...0.6)
+            slider("Horizontal", value: Binding(
+                get: { state.selectedLayout.camRect.x },
+                set: { var l = state.selectedLayout; l.camRect.x = $0; state.selectedLayout = l }),
+                in: 0...0.94)
+            slider("Vertical", value: Binding(
+                get: { state.selectedLayout.camRect.y },
+                set: { var l = state.selectedLayout; l.camRect.y = $0; state.selectedLayout = l }),
+                in: 0...0.94)
+        }
+    }
+
+    private func positionButton(_ label: String, x: Double, y: Double) -> some View {
+        Button(label) {
+            var l = state.selectedLayout
+            l.camRect.x = x
+            l.camRect.y = y
+            state.selectedLayout = l
+        }
+        .font(.system(size: 12))
+        .buttonStyle(.bordered)
+    }
+
+    // Reparto del lado a lado: 20/80 a 80/20.
+    private var splitSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            let pct = Int(state.selectedLayout.splitRatio * 100)
+            Text("Reparto: cámara \(pct) % · pantalla \(100 - pct) %")
+                .font(.caption).foregroundStyle(.secondary)
+            Slider(value: Binding(
+                get: { state.selectedLayout.splitRatio },
+                set: { var l = state.selectedLayout; l.splitRatio = $0; state.selectedLayout = l }
+            ), in: 0.2...0.8)
+        }
+    }
+
+    // Ajustes por fuente: cómo entra la imagen en su ventana, y el recorte.
+    private func sourceSection(title: String,
+                               keyPath: WritableKeyPath<SegmentLayout, SourceSettings>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Picker("Ajuste", selection: Binding(
+                get: { state.selectedLayout[keyPath: keyPath].fit },
+                set: { var l = state.selectedLayout; l[keyPath: keyPath].fit = $0; state.selectedLayout = l }
+            )) {
+                Text("Llenar (recorta sobrante)").tag(SourceFit.fill)
+                Text("Encajar entera").tag(SourceFit.fit)
+                Text("Recorte manual").tag(SourceFit.crop)
+            }
+            .pickerStyle(.menu)
+
+            if state.selectedLayout[keyPath: keyPath].fit == .crop {
+                cropControls(keyPath: keyPath)
+            }
+        }
+    }
+
+    // Recorte manual: qué parte del fotograma original se usa.
+    private func cropControls(keyPath: WritableKeyPath<SegmentLayout, SourceSettings>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            slider("Desde la izquierda", value: Binding(
+                get: { state.selectedLayout[keyPath: keyPath].crop.x },
+                set: { var l = state.selectedLayout; l[keyPath: keyPath].crop.x = $0; state.selectedLayout = l }),
+                in: 0...0.95)
+            slider("Desde arriba", value: Binding(
+                get: { state.selectedLayout[keyPath: keyPath].crop.y },
+                set: { var l = state.selectedLayout; l[keyPath: keyPath].crop.y = $0; state.selectedLayout = l }),
+                in: 0...0.95)
+            slider("Ancho", value: Binding(
+                get: { state.selectedLayout[keyPath: keyPath].crop.width },
+                set: { var l = state.selectedLayout; l[keyPath: keyPath].crop.width = $0; state.selectedLayout = l }),
+                in: 0.05...1)
+            slider("Alto", value: Binding(
+                get: { state.selectedLayout[keyPath: keyPath].crop.height },
+                set: { var l = state.selectedLayout; l[keyPath: keyPath].crop.height = $0; state.selectedLayout = l }),
+                in: 0.05...1)
+            Button("Restablecer recorte") {
+                var l = state.selectedLayout
+                l[keyPath: keyPath].crop = SourceCrop()
+                state.selectedLayout = l
+            }
+            .font(.system(size: 11))
+        }
+        .padding(.leading, 8)
+    }
+
+    private var shapeSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Forma", selection: Binding(
+                get: { state.selectedLayout.shape },
+                set: { var l = state.selectedLayout; l.shape = $0; state.selectedLayout = l }
+            )) {
+                Text("Rectángulo").tag(SegmentLayout.Shape.rect)
+                Text("Redondeada").tag(SegmentLayout.Shape.rounded)
+                Text("Círculo").tag(SegmentLayout.Shape.circle)
+            }
+            .pickerStyle(.segmented)
+            slider("Borde", value: Binding(
+                get: { state.selectedLayout.borderWidth },
+                set: { var l = state.selectedLayout; l.borderWidth = $0; state.selectedLayout = l }),
+                in: 0...0.05)
+        }
+    }
+
+    // El fondo es GLOBAL (no por tramo): color, degradado o imagen.
+    private var backgroundSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Fondo (todo el vídeo)").font(.caption).foregroundStyle(.secondary)
+            Picker("Tipo", selection: Binding(
+                get: { backgroundKind },
+                set: { setBackgroundKind($0) }
+            )) {
+                Text("Color").tag(0)
+                Text("Degradado").tag(1)
+                Text("Imagen").tag(2)
+            }
+            .pickerStyle(.segmented)
+
+            switch state.project.background {
+            case .color(let c):
+                colorRow("Color", c) { new in state.project.background = .color(new) }
+            case .gradient(let top, let bottom):
+                colorRow("Arriba", top) { new in
+                    state.project.background = .gradient(top: new, bottom: bottom)
+                }
+                colorRow("Abajo", bottom) { new in
+                    state.project.background = .gradient(top: top, bottom: new)
+                }
+            case .image(let path, let mode):
+                let missing = !FileManager.default.fileExists(atPath: path)
+                HStack {
+                    if missing {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    Text(URL(fileURLWithPath: path).lastPathComponent
+                         + (missing ? " (no encontrada)" : ""))
+                        .font(.caption).lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(missing ? .orange : .primary)
+                    Spacer()
+                    Button("Elegir…") { chooseBackgroundImage(mode: mode) }
+                        .font(.system(size: 11))
+                }
+                Picker("Modo", selection: Binding(
+                    get: { mode },
+                    set: { state.project.background = .image(path: path, mode: $0) }
+                )) {
+                    Text("Expandida").tag(BackgroundStyle.ImageMode.fill)
+                    Text("Adaptada").tag(BackgroundStyle.ImageMode.fit)
+                    Text("Estirada").tag(BackgroundStyle.ImageMode.stretch)
+                    Text("Mosaico").tag(BackgroundStyle.ImageMode.tile)
+                    Text("Centrada").tag(BackgroundStyle.ImageMode.center)
+                }
+                .pickerStyle(.menu)
+            }
+        }
+    }
+
+    private var backgroundKind: Int {
+        switch state.project.background {
+        case .color: return 0
+        case .gradient: return 1
+        case .image: return 2
+        }
+    }
+
+    private func setBackgroundKind(_ kind: Int) {
+        switch kind {
+        case 0: state.project.background = .color(RGBA(r: 0.07, g: 0.09, b: 0.13))
+        case 1: state.project.background = .gradient(top: RGBA(r: 0.1, g: 0.15, b: 0.3),
+                                                     bottom: RGBA(r: 0.02, g: 0.03, b: 0.08))
+        default: chooseBackgroundImage(mode: .fill)
+        }
+    }
+
+    private func chooseBackgroundImage(mode: BackgroundStyle.ImageMode) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
+        if panel.runModal() == .OK, let url = panel.url {
+            // Si la ruta estuvo ausente y reaparece, el compositor debe
+            // reintentarla en vez de recordarla como perdida.
+            FrameComposer.forgetMissing(url.path)
+            state.project.background = .image(path: url.path, mode: mode)
+        }
+    }
+
+    private func colorRow(_ label: String, _ color: RGBA,
+                          set: @escaping (RGBA) -> Void) -> some View {
+        ColorPicker(label, selection: Binding(
+            get: { Color(red: color.r, green: color.g, blue: color.b, opacity: color.a) },
+            set: { new in
+                let ns = NSColor(new).usingColorSpace(.deviceRGB) ?? .black
+                set(RGBA(r: ns.redComponent, g: ns.greenComponent,
+                         b: ns.blueComponent, a: ns.alphaComponent))
+            }
+        ))
+        .font(.caption)
+    }
+
+    private func slider(_ label: String, value: Binding<Double>,
+                        in range: ClosedRange<Double>) -> some View {
+        HStack {
+            Text(label).font(.system(size: 11)).frame(width: 110, alignment: .leading)
+            Slider(value: value, in: range)
+        }
+    }
+}
+
 // AVPlayerView trae controles del sistema (play, timeline) sin gestos que
-// estorben; para el MVP basta y sobra.
+// estorben; el cursor propio de la tira va sincronizado por el observador.
 private struct EditorPlayerSurface: NSViewRepresentable {
     let player: AVPlayer
 

@@ -115,6 +115,64 @@ enum SelfTest {
         expect(strongFinal.kind == .advanced && strongFinal.to == 14,
                "resultado final con cuatro palabras confirma el salto")
 
+        // Proyecto de composición: tramos sin huecos, por construcción.
+        var project = VideoProject()
+        project.duration = 10
+        expect(project.segmentIndex(at: 5) == 0, "sin cortes todo es el tramo 0")
+        expect(project.addCut(at: 4) == 1, "cortar crea el tramo 1")
+        expect(project.addCut(at: 7) == 2, "segundo corte crea el tramo 2")
+        expect(project.layouts.count == 3 && project.cuts == [4, 7],
+               "tres tramos, dos cortes ordenados")
+        expect(project.segmentIndex(at: 3.9) == 0 && project.segmentIndex(at: 4.0) == 1
+               && project.segmentIndex(at: 8) == 2, "cada instante cae en su tramo")
+        expect(project.addCut(at: 4.05) == nil, "corte pegado a otro se rechaza")
+        expect(project.addCut(at: 9.95) == nil, "corte pegado al final se rechaza")
+        var beforeRemove = project
+        beforeRemove.removeSegment(1)
+        expect(beforeRemove.layouts.count == 2 && beforeRemove.cuts == [7],
+               "borrar el tramo 1 lo fusiona con el 0")
+        var removeFirst = project
+        removeFirst.removeSegment(0)
+        expect(removeFirst.layouts.count == 2 && removeFirst.cuts == [7],
+               "borrar el primero lo fusiona con el siguiente")
+        project.moveCut(0, to: 6.5)
+        expect(project.cuts[0] == 6.5, "mover un corte dentro de su hueco")
+        project.moveCut(0, to: 9)
+        expect(project.cuts[0] < 7, "mover un corte no invade al vecino")
+        // Cambiar el layout de un tramo no toca a los demás.
+        var layoutEdit = project
+        layoutEdit.layouts[1].mode = .sideBySide
+        layoutEdit.layouts[1].splitRatio = 0.3
+        expect(layoutEdit.layouts[0].mode == .overlay, "editar un tramo no contagia al resto")
+        expect(layoutEdit.layouts[1].sanitized().splitRatio == 0.3, "reparto 30/70 se conserva")
+        var wild = SegmentLayout()
+        wild.splitRatio = 7
+        wild.camRect = NRect(x: -3, y: 9, width: 0.001, height: 44)
+        wild.camera.crop = SourceCrop(x: 5, y: -2, width: 0, height: 33)
+        let tamed = wild.sanitized()
+        expect(tamed.splitRatio == 0.8 && tamed.camRect.x >= 0 && tamed.camRect.width >= 0.06
+               && tamed.camera.crop.width >= 0.05 && tamed.camera.crop.x <= 1,
+               "valores salvajes quedan domesticados")
+        // Ida y vuelta por JSON: el proyecto sobrevive intacto.
+        if let data = try? JSONEncoder().encode(project),
+           let back = try? JSONDecoder().decode(VideoProject.self, from: data) {
+            expect(back == project, "el proyecto sobrevive al viaje por JSON")
+        } else {
+            expect(false, "el proyecto sobrevive al viaje por JSON")
+        }
+        var broken = project
+        broken.layouts = [SegmentLayout()]   // invariante roto adrede
+        expect(broken.sanitized().layouts.count == broken.sanitized().cuts.count + 1,
+               "sanitized repara un project.json manipulado")
+        // Regresión del blocker: cargar un proyecto ANTES de conocer la
+        // duración (duration=0) jamás puede destruir los cortes guardados.
+        var unknownDuration = project
+        unknownDuration.duration = 0
+        let survived = unknownDuration.sanitized()
+        expect(survived.cuts.count == project.cuts.count
+               && survived.layouts.count == project.layouts.count,
+               "duración desconocida conserva cortes y tramos")
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",

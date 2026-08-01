@@ -22,6 +22,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Abrir directo el editor de composición (pruebas y acceso rápido).
+        if CommandLine.arguments.contains("--editor") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                VideoEditorWindowController.shared.open()
+            }
+        }
         // Una sola instancia: si ya hay una abierta, se trae al frente y esta
         // se retira. Evita ventanas duplicadas al abrir la app dos veces.
         if let id = Bundle.main.bundleIdentifier {
