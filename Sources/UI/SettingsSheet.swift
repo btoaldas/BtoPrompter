@@ -230,16 +230,7 @@ struct VoiceSettingsTab: View {
                 Text("Sin esta autorización, BtoPrompter usa únicamente alternativas locales. Las claves se guardan en este Mac y nunca se escriben en los logs.")
                     .font(.system(size: 10)).foregroundColor(.secondary)
                 ForEach(VoiceProviderID.allCases.filter { $0.secretName != nil }) { provider in
-                    if let secretName = provider.secretName {
-                        VStack(alignment: .leading, spacing: 3) {
-                            SecureField("API key de \(provider.name)", text: Binding(
-                                get: { SecretsStore.get(secretName) },
-                                set: { SecretsStore.set($0, for: secretName) }
-                            ))
-                            Text("\(provider.defaultModel) · \(provider.privacyNote)")
-                                .font(.system(size: 9)).foregroundColor(.secondary)
-                        }
-                    }
+                    ExternalProviderCard(provider: provider)
                 }
             }
 

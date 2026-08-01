@@ -60,6 +60,41 @@ enum VoiceProviderID: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    // Modelos ofrecidos en el selector. El usuario puede escribir otro.
+    var availableModels: [String] {
+        switch self {
+        case .appleLocal, .appleCloud: return []
+        case .elevenLabs: return ["scribe_v2_realtime", "scribe_v1"]
+        case .deepgram: return ["nova-3", "nova-2", "enhanced"]
+        case .voxtralCloud: return ["voxtral-mini-transcribe-realtime-2602", "voxtral-small-latest"]
+        case .soniox: return ["stt-rt-v5", "stt-rt-preview"]
+        case .assemblyAI: return ["universal-3-5-pro", "universal-streaming"]
+        case .speechmatics: return ["enhanced", "standard"]
+        case .gladia: return ["solaria-1", "accurate", "fast"]
+        }
+    }
+
+    // Clave de preferencias donde se guarda el modelo elegido por proveedor.
+    var modelSettingKey: String { "sttModel_\(rawValue)" }
+
+    var configuredModel: String {
+        let stored = UserDefaults.standard.string(forKey: modelSettingKey) ?? ""
+        return stored.isEmpty ? defaultModel : stored
+    }
+
+    var docsURL: URL? {
+        switch self {
+        case .elevenLabs: return URL(string: "https://elevenlabs.io/app/settings/api-keys")
+        case .deepgram: return URL(string: "https://console.deepgram.com/")
+        case .voxtralCloud: return URL(string: "https://console.mistral.ai/api-keys")
+        case .soniox: return URL(string: "https://console.soniox.com/")
+        case .assemblyAI: return URL(string: "https://www.assemblyai.com/app/api-keys")
+        case .speechmatics: return URL(string: "https://portal.speechmatics.com/manage-access/")
+        case .gladia: return URL(string: "https://app.gladia.io/account")
+        case .appleLocal, .appleCloud: return nil
+        }
+    }
+
     var privacyNote: String {
         isLocal ? "El audio no sale del Mac." : "El audio se envía en vivo al proveedor elegido."
     }

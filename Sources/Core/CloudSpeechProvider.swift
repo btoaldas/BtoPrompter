@@ -24,6 +24,61 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         self.id = id
     }
 
+    // Comprobación de credenciales sin enviar audio: una petición REST barata
+    // a un endpoint de solo lectura de cada proveedor.
+    static func validateCredentials(provider: VoiceProviderID, apiKey: String,
+                                    completion: @escaping (Result<String, Error>) -> Void) {
+        let key = apiKey.trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty else {
+            completion(.failure(VoiceProviderError.missingKey(provider)))
+            return
+        }
+        var request: URLRequest
+        switch provider {
+        case .elevenLabs:
+            request = URLRequest(url: URL(string: "https://api.elevenlabs.io/v1/user/subscription")!)
+            request.setValue(key, forHTTPHeaderField: "xi-api-key")
+        case .deepgram:
+            request = URLRequest(url: URL(string: "https://api.deepgram.com/v1/projects")!)
+            request.setValue("Token \(key)", forHTTPHeaderField: "Authorization")
+        case .voxtralCloud:
+            request = URLRequest(url: URL(string: "https://api.mistral.ai/v1/models")!)
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        case .soniox:
+            request = URLRequest(url: URL(string: "https://api.soniox.com/v1/models")!)
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        case .assemblyAI:
+            request = URLRequest(url: URL(string: "https://api.assemblyai.com/v2/transcript?limit=1")!)
+            request.setValue(key, forHTTPHeaderField: "Authorization")
+        case .speechmatics:
+            request = URLRequest(url: URL(string: "https://asr.api.speechmatics.com/v2/jobs?limit=1")!)
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        case .gladia:
+            request = URLRequest(url: URL(string: "https://api.gladia.io/v2/transcription?limit=1")!)
+            request.setValue(key, forHTTPHeaderField: "x-gladia-key")
+        case .appleLocal, .appleCloud:
+            completion(.success("proveedor local, no necesita clave"))
+            return
+        }
+        request.timeoutInterval = 20
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            switch status {
+            case 200...299:
+                completion(.success(""))
+            case 401, 403:
+                completion(.failure(VoiceProviderError.unavailable("Clave rechazada por el proveedor (HTTP \(status)).")))
+            default:
+                let detail = String(data: data ?? Data(), encoding: .utf8)?.prefix(120) ?? ""
+                completion(.failure(VoiceProviderError.unavailable("HTTP \(status). \(detail)")))
+            }
+        }.resume()
+    }
+
     func start(inputFormat: AVAudioFormat, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let secretName = id.secretName else {
             completion(.failure(VoiceProviderError.missingKey(id)))
@@ -43,7 +98,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         case .elevenLabs:
             var components = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
             components.queryItems = [
-                .init(name: "model_id", value: VoiceProviderID.elevenLabs.defaultModel),
+                .init(name: "model_id", value: VoiceProviderID.elevenLabs.configuredModel),
                 .init(name: "audio_format", value: "pcm_16000"),
                 .init(name: "language_code", value: "es"),
                 .init(name: "commit_strategy", value: "vad"),
@@ -55,7 +110,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         case .deepgram:
             var components = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
             components.queryItems = [
-                .init(name: "model", value: VoiceProviderID.deepgram.defaultModel),
+                .init(name: "model", value: VoiceProviderID.deepgram.configuredModel),
                 .init(name: "language", value: "es"),
                 .init(name: "encoding", value: "linear16"),
                 .init(name: "sample_rate", value: "16000"),
@@ -69,7 +124,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
             open(request: request)
         case .voxtralCloud:
             var components = URLComponents(string: "wss://api.mistral.ai/v1/audio/transcriptions/realtime")!
-            components.queryItems = [.init(name: "model", value: VoiceProviderID.voxtralCloud.defaultModel)]
+            components.queryItems = [.init(name: "model", value: VoiceProviderID.voxtralCloud.configuredModel)]
             var request = URLRequest(url: components.url!)
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             open(request: request, confirmationEvent: "session.created")
@@ -77,7 +132,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
             let request = URLRequest(url: URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!)
             open(request: request, initialJSON: [
                 "api_key": key,
-                "model": VoiceProviderID.soniox.defaultModel,
+                "model": VoiceProviderID.soniox.configuredModel,
                 "audio_format": "pcm_s16le",
                 "sample_rate": 16000,
                 "num_channels": 1,
@@ -87,7 +142,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         case .assemblyAI:
             var components = URLComponents(string: "wss://streaming.assemblyai.com/v3/ws")!
             components.queryItems = [
-                .init(name: "speech_model", value: VoiceProviderID.assemblyAI.defaultModel),
+                .init(name: "speech_model", value: VoiceProviderID.assemblyAI.configuredModel),
                 .init(name: "sample_rate", value: "16000"),
                 .init(name: "encoding", value: "pcm_s16le"),
                 .init(name: "format_turns", value: "true"),
@@ -172,7 +227,7 @@ final class CloudSpeechProvider: NSObject, LiveSpeechProvider {
         request.setValue(key, forHTTPHeaderField: "x-gladia-key")
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "encoding": "wav/pcm", "sample_rate": 16000, "bit_depth": 16, "channels": 1,
-            "model": VoiceProviderID.gladia.defaultModel,
+            "model": VoiceProviderID.gladia.configuredModel,
             "language_config": ["languages": ["es"]],
             "messages_config": [
                 "receive_partial_transcripts": true,
