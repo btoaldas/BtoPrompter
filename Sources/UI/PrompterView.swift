@@ -152,12 +152,18 @@ struct PrompterView: View {
             }
             ControlButton(symbol: model.voiceFollow ? "mic.fill" : "mic.slash.fill",
                           help: model.voiceActive
-                              ? "Escuchándote: el prompter avanza con tu voz"
+                              ? model.voiceProviderState.label
                               : (model.voiceFollow
                                  ? "Seguimiento por voz activado: arrancará al dar play"
-                                 : "Seguirme por voz: el prompter avanza escuchándote (local, sin internet)"),
+                                 : "Seguirme por voz: el prompter avanza escuchándote"),
                           color: model.voiceActive ? Theme.spyOn : (model.voiceFollow ? .orange : .gray)) {
                 model.voiceFollow.toggle()
+            }
+            if model.voiceActive && Settings.bool(.diagnosticsRecordAudio, default: false) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 7, height: 7)
+                    .help("Grabando tu voz localmente para diagnóstico")
             }
             Divider().frame(height: 18)
             HStack(spacing: 4) {

@@ -52,10 +52,79 @@ enum SelfTest {
                "salto adelante dentro de la ventana")
         expect(VoiceMatcher.findPosition(heard: ["improvisando", "cosas", "raras"], script: script, current: 3) == nil,
                "sin match espera (improvisación)")
-        expect(VoiceMatcher.findPosition(heard: ["presentarles"], script: script, current: 4) == 6,
-               "palabra única distintiva")
+        expect(VoiceMatcher.findPosition(heard: ["presentarles"], script: script, current: 4) == nil,
+               "una palabra sola no mueve el guion")
         expect(VoiceMatcher.findPosition(heard: ["a"], script: script, current: 0) == nil,
                "palabra única corta no dispara")
+        expect(VoiceMatcher.findPosition(heard: ["quiero", "presentarle", "el"],
+                                         script: script, current: 4) == 7,
+               "tolera un error pequeño del reconocedor")
+
+        // Frases repetidas: nunca adivina cuál aparición quiso decir el orador.
+        let repeated = "inicio tema comun para todos cierre primero pausa inicio tema comun para todos cierre segundo"
+            .split(separator: " ").map(String.init)
+        let guardrail = VoiceAlignmentGuard()
+        guardrail.reset(at: 0)
+        let repeated1 = guardrail.evaluate(text: "inicio tema común para todos", isFinal: false,
+                                           script: repeated, current: 0,
+                                           maxJump: 30, sensitivity: 0.72,
+                                           confirmLargeJumps: true)
+        expect(repeated1.kind == .ambiguous, "frase repetida espera contexto único")
+        let repeated2 = guardrail.evaluate(text: "inicio tema común para todos", isFinal: false,
+                                           script: repeated, current: 0,
+                                           maxJump: 30, sensitivity: 0.72,
+                                           confirmLargeJumps: true)
+        expect(repeated2.kind == .ignored, "parcial duplicado no cuenta como confirmación")
+        let repeated3 = guardrail.evaluate(text: "inicio tema común para todos cierre primero",
+                                           isFinal: false, script: repeated, current: 0,
+                                           maxJump: 30, sensitivity: 0.72,
+                                           confirmLargeJumps: true)
+        expect(repeated3.kind == .pending, "salto grande único pide evidencia progresiva")
+        let repeated4 = guardrail.evaluate(text: "inicio tema común para todos cierre primero pausa",
+                                           isFinal: false, script: repeated, current: 0,
+                                           maxJump: 30, sensitivity: 0.72,
+                                           confirmLargeJumps: true)
+        expect(repeated4.kind == .advanced && repeated4.to == 8,
+               "contexto creciente confirma sin saltar a la segunda aparición")
+        guardrail.reset(at: 13)
+        let backward = guardrail.evaluate(text: "inicio tema común para todos cierre primero",
+                                          isFinal: true, script: repeated, current: 13,
+                                          maxJump: 30, sensitivity: 0.72,
+                                          confirmLargeJumps: true)
+        expect(backward.kind != .advanced, "el seguidor jamás retrocede")
+
+        let farScript = "uno dos tres cuatro cinco seis siete ocho nueve diez ahora cambiamos al cierre final"
+            .split(separator: " ").map(String.init)
+        guardrail.reset(at: 0)
+        let far1 = guardrail.evaluate(text: "ahora cambiamos", isFinal: false,
+                                      script: farScript, current: 0, maxJump: 30,
+                                      sensitivity: 0.72, confirmLargeJumps: true)
+        let farDuplicate = guardrail.evaluate(text: "ahora cambiamos", isFinal: false,
+                                              script: farScript, current: 0, maxJump: 30,
+                                              sensitivity: 0.72, confirmLargeJumps: true)
+        let far2 = guardrail.evaluate(text: "ahora cambiamos al", isFinal: false,
+                                      script: farScript, current: 0, maxJump: 30,
+                                      sensitivity: 0.72, confirmLargeJumps: true)
+        expect(far1.kind == .pending && farDuplicate.kind == .ignored && far2.kind == .advanced,
+               "salto grande requiere dos parciales distintos")
+        guardrail.reset(at: 0)
+        let strongFinal = guardrail.evaluate(text: "ahora cambiamos al cierre", isFinal: true,
+                                             script: farScript, current: 0, maxJump: 30,
+                                             sensitivity: 0.72, confirmLargeJumps: true)
+        expect(strongFinal.kind == .advanced && strongFinal.to == 14,
+               "resultado final con cuatro palabras confirma el salto")
+
+        let failover = VoiceProviderCatalog.configuredOrder(
+            primary: .deepgram,
+            rawFallbacks: "soniox,deepgram,apple_local",
+            failover: true
+        )
+        expect(failover.prefix(3).elementsEqual([.deepgram, .soniox, .appleLocal]),
+               "failover respeta prioridad y elimina duplicados")
+        expect(VoiceProviderCatalog.configuredOrder(primary: .gladia,
+                                                     rawFallbacks: "apple_local",
+                                                     failover: false) == [.gladia],
+               "failover desactivado usa solo el proveedor elegido")
 
         // Marcas de diapositiva en guías.
         let t7 = ScriptParser.parse("// Diapositiva 2\nTexto normal.\n// mirar al público", guideTitles: true)

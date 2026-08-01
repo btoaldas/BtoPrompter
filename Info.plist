@@ -25,9 +25,9 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>BtoPrompter transcribe archivos de audio y puede seguir tu lectura en vivo para avanzar el guion.</string>
+	<string>BtoPrompter usa el reconocimiento de voz para transcribir audio y seguir tu lectura. El motor local de Apple procesa el audio en este Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>BtoPrompter escucha tu voz (solo en este equipo) para avanzar el guion mientras hablas.</string>
+	<string>BtoPrompter escucha tu voz para avanzar el guion. El audio solo sale del Mac si eliges y autorizas expresamente un proveedor externo.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>BtoPrompter puede avanzar tus diapositivas de Keynote o PowerPoint cuando el guion cruza una marca de diapositiva.</string>
 </dict>

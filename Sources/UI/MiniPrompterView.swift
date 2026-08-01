@@ -64,9 +64,14 @@ struct MiniPrompterView: View {
                         }
                     }
                     ControlButton(symbol: model.voiceFollow ? "mic.fill" : "mic.slash.fill",
-                                  help: "Seguirme por voz", size: 12,
+                                  help: model.voiceActive ? model.voiceProviderState.label : "Seguirme por voz",
+                                  size: 12,
                                   color: model.voiceActive ? Theme.spyOn : (model.voiceFollow ? .orange : .gray)) {
                         model.voiceFollow.toggle()
+                    }
+                    if model.voiceActive && Settings.bool(.diagnosticsRecordAudio, default: false) {
+                        Circle().fill(Color.red).frame(width: 6, height: 6)
+                            .help("Grabando tu voz localmente para diagnóstico")
                     }
                     ControlButton(symbol: model.spyMode ? "eye.slash.fill" : "eye.fill",
                                   help: "Invisible/visible al compartir pantalla", size: 12,

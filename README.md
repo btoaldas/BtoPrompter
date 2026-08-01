@@ -24,9 +24,13 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - 📏 **Modo minimalista** — barra delgada pegada arriba de la pantalla (debajo del notch), todo el ancho, karaoke en máximo 2 líneas con controles esenciales a los costados. Tecla `M` para entrar y salir; el alto se adapta al tamaño de letra.
 - 🔠 **Tamaño de letra ajustable** en vivo.
 - 🖱️ **Clic en cualquier oración** para saltar directamente ahí.
-- ⚙️ **Configuración central** (engranaje o `⌘,`): velocidad, letras, transparencia, comportamiento, proveedor de IA y comprobación de actualizaciones contra GitHub Releases.
+- ⚙️ **Configuración central** (engranaje o `⌘,`): General, Voz, Diagnóstico, Ensayo IA, Remoto y actualizaciones.
 - ⏱️ **Cuenta regresiva y autoplay** — 3-2-1 configurable (0–10 s) antes de arrancar, y opción de reproducir automáticamente al entrar al prompter.
-- 🗣️ **Seguimiento por voz (opcional)** — el prompter te escucha (reconocimiento local de Apple, sin internet) y avanza al ritmo real de tu lectura; si improvisas o te saltas una frase, te espera.
+- 🗣️ **Seguimiento por voz (opcional)** — Apple local o nube, ElevenLabs, Deepgram, Mistral Voxtral, Soniox, AssemblyAI, Speechmatics y Gladia. Proveedor principal y primer respaldo configurables; el failover nunca mantiene dos motores activos a la vez.
+- 🧭 **Alineación conservadora** — jamás retrocede por sí sola, ignora parciales duplicados y, ante frases repetidas o saltos grandes, espera contexto adicional antes de mover el guion.
+- 🧰 **Diagnóstico local controlado** — logs rotados, eventos de reproducción/alineación y grabación opcional solo de voz. Retención y espacio máximo configurables; claves y tokens se ocultan.
+- 🧠 **Perfil local del orador (opcional)** — aprende ritmo, longitud de frase y conectores a partir de ensayos. Compartir ese resumen con Ensayo IA requiere un segundo permiso explícito.
+- 🔊 **Lectura TTS local** — escucha el discurso con las voces instaladas en macOS, elige voz y ritmo, sin enviar el texto a internet.
 - 🎬 **Diapositivas automáticas (opcional)** — al cruzar una guía "// Diapositiva N" avanza Keynote o PowerPoint por AppleScript: expones sin tocar nada.
 - ⏱️ **Cronómetro de ensayo** — al terminar te dice tiempo real, ritmo efectivo y, si pones una meta en minutos, la velocidad exacta que necesitas; calibración con un clic.
 - 📱 **Control remoto desde el teléfono (opcional)** — servidor local con página de botones grandes (play/pausa, velocidad, saltos) y QR para escanear; protegido con token, solo en tu red.
@@ -60,7 +64,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 - **Swift** (AppKit + SwiftUI), cero dependencias externas, arquitectura por capas (ver [ARCHITECTURE.md](ARCHITECTURE.md)).
 - Tokenización de oraciones con **NaturalLanguage** (`NLTokenizer`).
 - Se compila con `swiftc` directo — no requiere proyecto de Xcode.
-- Requiere macOS 13 o superior (Apple Silicon o Intel).
+- Requiere macOS 13 o superior (Apple Silicon o Intel). El nuevo Apple Speech local en vivo requiere macOS 26; en versiones anteriores se puede elegir otro proveedor compatible.
 
 ## Instalación
 
@@ -88,7 +92,15 @@ En el editor, botón **IA…** → activa el interruptor, elige proveedor (Groq,
 - `// texto` — guía visible no leída (azul).
 - `[v+20]` / `[v-30]` / `[v=]` al inicio de línea — sube/baja la velocidad de ese tramo, o vuelve a la normal.
 
-La key se guarda solo en las preferencias locales de tu Mac; nunca sale del equipo salvo hacia el proveedor que tú configures.
+La key se guarda en un archivo local con permisos privados (`0600`); nunca se incluye en logs ni en el repositorio. El texto solo se envía al proveedor que tú configures cuando ejecutas esta función.
+
+### Voz, privacidad y modelos
+
+- **Apple local** usa el dictado progresivo de macOS 26 y su modelo de idioma administrado por el sistema. En Configuración → Voz puedes comprobarlo, descargarlo, pausar y continuar.
+- Los proveedores externos están bloqueados hasta que actives **“Autorizo enviar mi voz…”** y agregues tu propia API key.
+- El failover omite proveedores sin permiso o sin key y continúa con el siguiente respaldo disponible.
+- Las grabaciones de diagnóstico son opcionales, locales y visibles mediante Configuración → Diagnóstico; pueden borrarse desde allí.
+- La transcripción de archivos de audio sigue disponible al importar `.m4a`, `.mp3`, `.wav`, `.aac`, `.aiff`, `.caf` o `.flac`.
 
 ### Notas sobre la invisibilidad
 
@@ -105,7 +117,9 @@ Flags de desarrollo: `--capturable` (arranca visible en capturas, útil para pro
 
 - Espejado horizontal para teleprompters físicos con espejo
 - Localización a otros idiomas
-- Control remoto desde el teléfono
+- Motor Whisper/NeMo completamente local y empaquetado
+- Voces TTS externas y clonadas con consentimiento explícito
+- Avatar autorizado con cámara/micrófono virtual como módulo independiente
 - Marcadores y notas de tiempo dentro del discurso
 
 ## Licencia

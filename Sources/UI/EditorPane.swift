@@ -7,6 +7,7 @@ struct EditorPane: View {
     @EnvironmentObject var model: PrompterModel
     @EnvironmentObject var store: SpeechStore
     @State var showAISheet = false
+    @ObservedObject private var speechPlayback = SpeechPlayback.shared
     // Borrador local del cuerpo: el TextEditor NUNCA escribe directo al store.
     // Evita que el buffer vacío del NSTextView pise un discurso al cambiar de
     // selección (pérdida de datos observada con el binding directo).
@@ -155,6 +156,13 @@ struct EditorPane: View {
                 Text("min").font(.system(size: 11)).foregroundColor(.gray)
             }
             .help("Duración objetivo: al terminar un ensayo te digo qué velocidad necesitas para cumplirla")
+            Button {
+                if speechPlayback.speaking { speechPlayback.stop() }
+                else { speechPlayback.speak(doc.body) }
+            } label: {
+                Image(systemName: speechPlayback.speaking ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            }
+            .help(speechPlayback.speaking ? "Detener lectura en voz alta" : "Escuchar el discurso con una voz de macOS")
             Button {
                 exportPDF(doc)
             } label: {

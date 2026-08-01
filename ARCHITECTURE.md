@@ -19,6 +19,13 @@ Sources/
 │   ├── ScriptParser.swift    Texto/Markdown → [Chunk] (función pura, testeable)
 │   ├── AIRehearsal.swift     Cliente de APIs estilo OpenAI + prompt de ritmo
 │   ├── Importers.swift       txt/md, pptx (unzip + XML), audio (Speech)
+│   ├── VoiceTracker.swift    Captura única, permisos y failover STT
+│   ├── VoiceAlignment.swift  Alineación monotónica y conservadora
+│   ├── VoiceTypes.swift      Contratos y catálogo de proveedores
+│   ├── AppleSpeechProviders.swift  Dictado Apple local/nube + modelos
+│   ├── CloudSpeechProvider.swift   Adaptadores STT externos en vivo
+│   ├── VoiceDiagnostics.swift      Logs/eventos/audio local acotado
+│   ├── SpeechPlayback.swift  Lectura TTS local de macOS
 │   └── GlobalHotKeys.swift   Atajos globales Carbon (sin permisos TCC)
 │
 ├── Storage/        Datos y parámetros ("base de datos")
@@ -26,6 +33,7 @@ Sources/
 │   │                         (Application Support, guardado agrupado, atómico)
 │   ├── Settings.swift        Parámetros globales tipados (UserDefaults)
 │   │                         + límites/constantes del prompter
+│   ├── SpeakingProfileStore.swift  Estadísticas locales del orador
 │   └── SecretsStore.swift    API keys → secrets.json con permisos 0600
 │
 └── UI/             Interfaz ("frontend", SwiftUI)

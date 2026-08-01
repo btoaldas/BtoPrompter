@@ -126,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        VoiceTracker.shared.stop()
+        PrompterModel.shared.finishSessionForTermination()
         GlobalHotKeys.shared.unregister()
         SpeechStore.shared.saveNow()
     }

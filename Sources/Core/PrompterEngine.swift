@@ -88,7 +88,9 @@ final class PrompterModel: ObservableObject {
         didSet {
             Settings.set(voiceFollow, .voiceFollow)
             if voiceFollow {
+                voiceAlignment.reset(at: currentIndex)
                 if mode == .prompting, isPlaying {
+                    voiceFollowFailed = false
                     pendingWork?.cancel()
                     VoiceTracker.shared.start()
                 } else {
@@ -97,17 +99,24 @@ final class PrompterModel: ObservableObject {
                     VoiceTracker.shared.requestPermissions { _ in }
                 }
             } else {
-                let wasListening = voiceActive
                 VoiceTracker.shared.stop()
-                if mode == .prompting, isPlaying, wasListening {
-                    scheduleNext()
+                voiceStatus = nil
+                // Apagar el micrófono SIEMPRE devuelve el avance por tiempo,
+                // aunque la escucha ya hubiera muerto (antes se quedaba parado).
+                if mode == .prompting, isPlaying {
+                    resumeTimedAdvance()
                 }
             }
         }
     }
     @Published var voiceActive: Bool = false
     @Published var voiceStatus: String? = nil
+    // La cadena de voz falló por completo: avanzar por tiempo pese al toggle.
+    var voiceFollowFailed: Bool = false
+    @Published var voiceProviderState: VoiceProviderState = .idle
+    @Published var voiceLastTranscript: String = ""
     private(set) var scriptNorm: [String] = []
+    private let voiceAlignment = VoiceAlignmentGuard()
 
     // Cronómetro de ensayo: tiempo efectivo de lectura y resultado al terminar.
     struct RehearsalResult {
@@ -127,6 +136,7 @@ final class PrompterModel: ObservableObject {
     private var playedSeconds: Double = 0
     private var playStartedAt: Date? = nil
     private var wordsAtStart: Int = 0
+    private var profileRecordedForSession = false
 
     // Ensayo con IA (parametrizable, apagado por defecto).
     @Published var aiEnabled: Bool {
@@ -216,10 +226,14 @@ final class PrompterModel: ObservableObject {
         }
         scriptNorm = norm
         currentIndex = 0
+        voiceAlignment.reset(at: 0)
+        voiceLastTranscript = ""
         isPlaying = false
         playedSeconds = 0
         playStartedAt = nil
+        profileRecordedForSession = false
         rehearsalResult = nil
+        VoiceDiagnostics.shared.startSession(speechID: doc.id, title: doc.title, script: doc.body)
         mode = .prompting
         NSApp.keyWindow?.makeFirstResponder(nil)
         GlobalHotKeys.shared.register()
@@ -229,6 +243,10 @@ final class PrompterModel: ObservableObject {
 
     func backToEditor() {
         pause()
+        maybeRecordSpeakingProfile()
+        VoiceDiagnostics.shared.event("back_to_editor", fields: ["word_index": currentIndex])
+        VoiceDiagnostics.shared.finishSession(finalTranscript: voiceLastTranscript,
+                                              wordsReached: currentIndex)
         mode = .editing
         GlobalHotKeys.shared.unregister()
         updateSleepAssertion()
@@ -279,7 +297,13 @@ final class PrompterModel: ObservableObject {
     private func startPlayback() {
         isPlaying = true
         playStartedAt = Date()
+        VoiceDiagnostics.shared.event("play", fields: [
+            "word_index": currentIndex,
+            "voice_follow": voiceFollow,
+        ])
         if voiceFollow {
+            voiceFollowFailed = false
+            voiceAlignment.reset(at: currentIndex)
             VoiceTracker.shared.start()
         } else {
             scheduleNext()
@@ -330,6 +354,11 @@ final class PrompterModel: ObservableObject {
         countdownWork = nil
         countdown = nil
         VoiceTracker.shared.stop()
+        VoiceDiagnostics.shared.event("pause", fields: [
+            "word_index": currentIndex,
+            "played_seconds": playedSeconds,
+        ])
+        if currentIndex >= totalWords - 1 { maybeRecordSpeakingProfile() }
         maybeFinishRehearsal()
     }
 
@@ -340,26 +369,56 @@ final class PrompterModel: ObservableObject {
     func reset() {
         pause()
         currentIndex = 0
+        voiceAlignment.reset(at: 0)
+        voiceLastTranscript = ""
         playedSeconds = 0
         playStartedAt = nil
         rehearsalResult = nil
+        VoiceDiagnostics.shared.event("reset")
+    }
+
+    private func maybeRecordSpeakingProfile() {
+        guard !profileRecordedForSession,
+              Settings.bool(.speechProfileEnabled, default: false),
+              playedSeconds >= 10,
+              VoiceMatcher.normalizedWords(voiceLastTranscript).count >= 20 else { return }
+        SpeakingProfileStore.shared.record(transcript: voiceLastTranscript, seconds: playedSeconds)
+        profileRecordedForSession = true
+    }
+
+    func finishSessionForTermination() {
+        accumulatePlayedTime()
+        maybeRecordSpeakingProfile()
+        VoiceDiagnostics.shared.finishSession(finalTranscript: voiceLastTranscript,
+                                              wordsReached: currentIndex)
     }
 
     func skip(_ delta: Int) {
         guard totalWords > 0 else { return }
+        let previous = currentIndex
         currentIndex = min(max(0, currentIndex + delta), totalWords - 1)
+        voiceAlignment.reset(at: currentIndex)
+        if voiceActive { VoiceTracker.shared.resetTranscriptContext() }
+        VoiceDiagnostics.shared.event("manual_skip", fields: [
+            "from": previous, "to": currentIndex, "delta": delta,
+        ])
         if isPlaying { reschedule() }
     }
 
     func jump(to index: Int) {
         guard totalWords > 0 else { return }
+        let previous = currentIndex
         currentIndex = min(max(0, index), totalWords - 1)
+        voiceAlignment.reset(at: currentIndex)
+        if voiceActive { VoiceTracker.shared.resetTranscriptContext() }
+        VoiceDiagnostics.shared.event("manual_jump", fields: ["from": previous, "to": currentIndex])
         if isPlaying { reschedule() }
     }
 
     func changeSpeed(_ delta: Int) {
         let r = Settings.Limits.wpmRange
         wpm = min(max(r.lowerBound, wpm + delta), r.upperBound)
+        VoiceDiagnostics.shared.event("speed_changed", fields: ["wpm": wpm])
         if isPlaying { reschedule() }
     }
 
@@ -386,21 +445,59 @@ final class PrompterModel: ObservableObject {
         scheduleNext()
     }
 
-    // Palabras oídas por el micrófono (transcripción parcial acumulada).
-    func voiceHeard(_ words: [String]) {
+    // Transcripción parcial/final del proveedor activo. El guardián mantiene
+    // una posición monotónica y exige contexto adicional ante frases repetidas.
+    func voiceHeard(_ event: VoiceTranscriptEvent) {
         guard isPlaying, voiceFollow, mode == .prompting else { return }
-        guard let p = VoiceMatcher.findPosition(heard: words, script: scriptNorm,
-                                                current: currentIndex) else { return }
-        let next = min(p + 1, totalWords - 1)
-        // Solo hacia adelante: evita rebotes con transcripciones parciales.
-        if next > currentIndex {
-            currentIndex = next
-            if next >= totalWords - 1 { pause() }
+        voiceLastTranscript = event.text
+        let decision = voiceAlignment.evaluate(
+            text: event.text,
+            isFinal: event.isFinal,
+            script: scriptNorm,
+            current: currentIndex,
+            maxJump: max(8, Settings.int(.voiceMaxJump, default: 60)),
+            sensitivity: min(0.95, max(0.55,
+                Settings.double(.voiceMatchSensitivity, default: 0.76))),
+            confirmLargeJumps: Settings.bool(.voiceConfirmLargeJumps, default: true)
+        )
+        VoiceDiagnostics.shared.alignment(decision)
+        guard decision.kind == .advanced, let next = decision.to,
+              next > currentIndex else { return }
+        currentIndex = min(next, totalWords - 1)
+        if currentIndex >= totalWords - 1 {
+            pause()
         }
     }
 
+    // Compatibilidad con herramientas de diagnóstico antiguas.
+    func voiceHeard(_ words: [String]) {
+        voiceHeard(VoiceTranscriptEvent(text: words.joined(separator: " "),
+                                        isFinal: false,
+                                        provider: .appleLocal,
+                                        receivedAt: Date()))
+    }
+
+    // Vuelve al avance por tiempo sin tocar la preferencia del usuario.
+    private func resumeTimedAdvance() {
+        pendingWork?.cancel()
+        guard mode == .prompting, isPlaying else { return }
+        scheduleNext()
+    }
+
+    // La cadena de proveedores de voz murió: seguir leyendo por tiempo para no
+    // dejar al orador con el guion congelado delante del público.
+    func resumeTimedAdvanceAfterVoiceFailure() {
+        guard mode == .prompting, isPlaying else { return }
+        voiceFollowFailed = true
+        pendingWork?.cancel()
+        scheduleNext()
+    }
+
     private func scheduleNext() {
-        guard isPlaying, !voiceFollow, currentIndex < totalWords - 1 else {
+        // voiceFollowFailed: la voz murió y seguimos por tiempo aunque el
+        // interruptor siga encendido.
+        guard isPlaying, !voiceFollow || voiceFollowFailed,
+              currentIndex < totalWords - 1 else {
             if currentIndex >= totalWords - 1 {
                 accumulatePlayedTime()
                 isPlaying = false
@@ -481,8 +578,17 @@ final class PrompterModel: ObservableObject {
         }
         aiBusy = true
         aiStatus = "Marcando ritmo con IA…"
+        var contextualPrompt = aiCustomPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = SpeakingProfileStore.shared
+        let minimum = max(1, Settings.int(.speechProfileMinimumSessions, default: 3))
+        if Settings.bool(.speechProfileEnabled, default: false),
+           Settings.bool(.speechProfileShareWithAI, default: false),
+           profile.profile.sessionCount >= minimum,
+           !profile.stylePrompt.isEmpty {
+            contextualPrompt += (contextualPrompt.isEmpty ? "" : "\n\n") + profile.stylePrompt
+        }
         AIRehearsal.run(text: doc.body, baseURL: aiEffectiveBaseURL, apiKey: key,
-                        model: aiModel, styleID: aiStyle, customPrompt: aiCustomPrompt) { result in
+                        model: aiModel, styleID: aiStyle, customPrompt: contextualPrompt) { result in
             DispatchQueue.main.async {
                 self.aiBusy = false
                 switch result {

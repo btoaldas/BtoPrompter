@@ -10,6 +10,13 @@ enum Settings {
         case wpm, fontSize, bgOpacity, spyMode, guideTitles, selectedID
         case miniMode, miniFontSize
         case countdownSeconds, autoPlay, keepAwake, accentColorID, voiceFollow
+        case voiceProvider, voiceFailoverEnabled, voiceFailoverOrder
+        case voiceLanguage, voiceCloudConsent, voiceAutoDownloadAppleModel
+        case voiceMatchSensitivity, voiceMaxJump, voiceConfirmLargeJumps
+        case diagnosticsEnabled, diagnosticsRecordAudio, diagnosticsRetentionDays
+        case diagnosticsMaxMegabytes, diagnosticsIncludeScript
+        case speechProfileEnabled, speechProfileMinimumSessions, speechProfileShareWithAI
+        case ttsVoiceIdentifier, ttsRate
         case rehearsalStats, autoInstallUpdates
         case remoteEnabled, remotePort, remoteToken
         case slideSyncEnabled, slideSyncApp
