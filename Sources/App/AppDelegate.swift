@@ -24,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Abrir directo el editor de composición (pruebas y acceso rápido).
         // Con ruta: esa carpeta; sin ruta: el selector de proyectos.
+        if CommandLine.arguments.contains("--studio") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                StudioWindowController.shared.open()
+            }
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--editor") {
             let folder: URL? = CommandLine.arguments.count > i + 1
                 && !CommandLine.arguments[i + 1].hasPrefix("--")
@@ -188,6 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setFrame(Theme.normalFrame(for: screen), display: true, animate: true)
     }
 
+    @objc func openStudio() {
+        MainActor.assumeIsolated {
+            StudioWindowController.shared.open()
+        }
+    }
+
     @objc func toggleRecording() {
         MainActor.assumeIsolated {
             RecordingEngine.shared.toggle()
@@ -253,6 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Grabar SIN teleprompter: para tutoriales y clases hablando libre,
         // sin pasar por el guion. Mismo motor y misma carpeta.
         if Settings.bool(.recordingEnabled, default: false) {
+            appMenu.addItem(NSMenuItem(title: "Estudio…",
+                                       action: #selector(openStudio), keyEquivalent: "0"))
             appMenu.addItem(NSMenuItem(title: "Grabar / Detener grabación",
                                        action: #selector(toggleRecording), keyEquivalent: "r"))
             let pauseItem = NSMenuItem(title: "Pausar / Reanudar grabación",
