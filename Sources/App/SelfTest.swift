@@ -325,7 +325,15 @@ enum SelfTest {
         expect(destino.ramped(progress: 2) == destino, "el progreso se recorta a 1")
 
         // Cancelación de audio: el retardo se encuentra por correlación.
-        let ruido = (0..<8000).map { _ in Float.random(in: -0.5...0.5) }
+        // El ruido es PSEUDOaleatorio con semilla fija: con Float.random la
+        // prueba pasaba casi siempre y fallaba de vez en cuando, que es la
+        // peor clase de prueba — nadie sabe si el fallo es real.
+        var semilla: UInt64 = 12345
+        let siguiente: () -> Float = {
+            semilla = semilla &* 6364136223846793005 &+ 1442695040888963407
+            return Float(Int32(truncatingIfNeeded: Int(semilla >> 33))) / Float(Int32.max)
+        }
+        let ruido = (0..<8000).map { _ in siguiente() * 0.5 }
         var eco = [Float](repeating: 0, count: 8000)
         let retardoReal = 1600
         for i in retardoReal..<8000 { eco[i] = ruido[i - retardoReal] * 0.7 }
@@ -341,7 +349,7 @@ enum SelfTest {
                "el filtro resta al menos la mitad del eco cuando puede seguirlo")
         expect(limpio.allSatisfy { $0.isFinite },
                "el filtro nunca escupe valores rotos (era NaN antes del arreglo)")
-        let solaVoz = (0..<4000).map { _ in Float.random(in: -0.3...0.3) }
+        let solaVoz = (0..<4000).map { _ in siguiente() * 0.3 }
         let sinReferencia = AudioEchoRemover.nlms(
             mic: solaVoz, reference: [Float](repeating: 0, count: 4000), delay: 0)
         expect(abs(nivel(sinReferencia) - nivel(solaVoz)) < 0.02,
