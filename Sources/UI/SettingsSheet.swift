@@ -450,6 +450,8 @@ struct DiagnosticsSettingsTab: View {
 struct RemoteTab: View {
     @ObservedObject private var remote = RemoteControl.shared
     @State private var trusted = RemoteInput.isTrusted
+    @State private var invertPointer = Settings.bool(.remoteInvertPointer, default: false)
+    @State private var invertScroll = Settings.bool(.remoteInvertScroll, default: false)
 
     private var computerControlBinding: Binding<Bool> {
         Binding(
@@ -519,16 +521,16 @@ struct RemoteTab: View {
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Toggle("Invertir el sentido vertical del puntero", isOn: .init(
-                    get: { Settings.bool(.remoteInvertPointer, default: false) },
-                    set: { Settings.set($0, .remoteInvertPointer) }
-                ))
-                .font(.system(size: 11))
-                Toggle("Invertir el sentido del desplazamiento (dos dedos)", isOn: .init(
-                    get: { Settings.bool(.remoteInvertScroll, default: false) },
-                    set: { Settings.set($0, .remoteInvertScroll) }
-                ))
-                .font(.system(size: 11))
+                // OJO: con un Binding directo a UserDefaults la vista no se
+                // entera del cambio y el check parecía no apagarse hasta
+                // cerrar y reabrir. El estado local sí refresca; el onChange
+                // persiste.
+                Toggle("Invertir el sentido vertical del puntero", isOn: $invertPointer)
+                    .onChange(of: invertPointer) { v in Settings.set(v, .remoteInvertPointer) }
+                    .font(.system(size: 11))
+                Toggle("Invertir el sentido del desplazamiento (dos dedos)", isOn: $invertScroll)
+                    .onChange(of: invertScroll) { v in Settings.set(v, .remoteInvertScroll) }
+                    .font(.system(size: 11))
             }
             Divider()
 
