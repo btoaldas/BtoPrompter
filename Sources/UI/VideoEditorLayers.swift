@@ -481,6 +481,20 @@ struct AudioSection: View {
             if let s = voiceover.status {
                 Text(s).font(.caption2).foregroundStyle(.orange)
             }
+            if hasSystemAudio {
+                HStack(spacing: 6) {
+                    Button(cleaning ? "Limpiando…" : "Quitar el sonido del sistema del micrófono") {
+                        cleanMicrophone()
+                    }
+                    .font(.system(size: 10))
+                    .disabled(cleaning)
+                    .help("Resta del micrófono lo que sonaba en el Mac, usando la "
+                          + "pista digital de la pantalla como referencia exacta")
+                    if let s = cleanStatus {
+                        Text(s).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
             HStack {
                 Image(systemName: "mic").font(.system(size: 10))
                 Text("Micrófono").font(.caption)
@@ -619,6 +633,59 @@ struct AudioSection: View {
         } else {
             voiceoverStart = playhead
             _ = voiceover.start(inFolder: state.folder)
+        }
+    }
+
+    @State private var cleaning = false
+    @State private var cleanStatus: String? = nil
+
+    private var hasSystemAudio: Bool {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: state.folder, includingPropertiesForKeys: nil)) ?? []
+        return files.contains { $0.lastPathComponent.hasPrefix("pantalla-") }
+    }
+
+    // Quita del micrófono el sonido del Mac usando la pista digital de la
+    // pantalla como referencia. La voz limpia entra como capa de audio y el
+    // micrófono original se baja a cero (reversible con su deslizador).
+    private func cleanMicrophone() {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: state.folder, includingPropertiesForKeys: nil)) ?? []
+        guard let mic = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") }),
+              let ref = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") }) else {
+            cleanStatus = "Hacen falta la cámara y la pantalla"
+            return
+        }
+        cleaning = true
+        cleanStatus = "Analizando…"
+        let out = state.folder.appendingPathComponent("voz-limpia.wav")
+        let folder = state.folder
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let r = try AudioEchoRemover.removeSystemAudio(
+                    micURL: mic, referenceURL: ref, outputURL: out)
+                DispatchQueue.main.async {
+                    cleaning = false
+                    var layer = AudioLayer(path: r.outputURL.path, name: "voz limpia")
+                    layer.volume = 1
+                    // Arranca donde arrancaba el micrófono original: la voz
+                    // limpia sale del mismo archivo, así que comparte reloj.
+                    layer.projectStart = 0
+                    var p = state.project
+                    p.audioLayers.append(layer)
+                    p.micVolume = 0
+                    state.project = p
+                    cleanStatus = String(format: "%.0f dB menos de sonido del sistema",
+                                         -r.reductionDB)
+                    onStructureChange()
+                    _ = folder
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    cleaning = false
+                    cleanStatus = error.localizedDescription
+                }
+            }
         }
     }
 

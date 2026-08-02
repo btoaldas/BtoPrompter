@@ -312,6 +312,41 @@ enum SelfTest {
         expect(CompositionBuilder.alignmentDelays(offsets: [:]).isEmpty,
                "sin piezas no hay nada que alinear")
 
+        // Rampa del zoom: el acercamiento va del encuadre completo al recorte.
+        let destino = SourceCrop(x: 0.3, y: 0.2, width: 0.4, height: 0.4)
+        let inicio = destino.ramped(progress: 0)
+        expect(inicio.x == 0 && inicio.width == 1 && inicio.height == 1,
+               "al empezar la rampa se ve el fotograma entero")
+        let medio = destino.ramped(progress: 0.5)
+        expect(abs(medio.width - 0.7) < 0.001 && abs(medio.x - 0.15) < 0.001,
+               "a mitad de rampa el encuadre va a medio camino")
+        expect(destino.ramped(progress: 1) == destino,
+               "al terminar la rampa manda el recorte elegido")
+        expect(destino.ramped(progress: 2) == destino, "el progreso se recorta a 1")
+
+        // Cancelación de audio: el retardo se encuentra por correlación.
+        let ruido = (0..<8000).map { _ in Float.random(in: -0.5...0.5) }
+        var eco = [Float](repeating: 0, count: 8000)
+        let retardoReal = 1600
+        for i in retardoReal..<8000 { eco[i] = ruido[i - retardoReal] * 0.7 }
+        let detectado = AudioEchoRemover.estimateDelay(mic: eco, reference: ruido)
+        expect(abs(detectado - retardoReal) <= 64,
+               "el retardo entre el sistema y el micrófono se encuentra solo")
+        let limpio = AudioEchoRemover.nlms(mic: eco, reference: ruido, delay: detectado)
+        func nivel(_ s: [Float]) -> Float {
+            let mitad = Array(s[(s.count / 2)...])
+            return sqrtf(mitad.reduce(0) { $0 + $1 * $1 } / Float(mitad.count))
+        }
+        expect(nivel(limpio) < nivel(eco) * 0.5,
+               "el filtro resta al menos la mitad del eco cuando puede seguirlo")
+        expect(limpio.allSatisfy { $0.isFinite },
+               "el filtro nunca escupe valores rotos (era NaN antes del arreglo)")
+        let solaVoz = (0..<4000).map { _ in Float.random(in: -0.3...0.3) }
+        let sinReferencia = AudioEchoRemover.nlms(
+            mic: solaVoz, reference: [Float](repeating: 0, count: 4000), delay: 0)
+        expect(abs(nivel(sinReferencia) - nivel(solaVoz)) < 0.02,
+               "sin sonido del sistema la voz sale intacta")
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",

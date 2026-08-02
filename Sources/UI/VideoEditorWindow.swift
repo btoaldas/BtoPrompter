@@ -211,6 +211,7 @@ struct VideoEditorView: View {
     @State private var isPlaying = false
     // Herramienta de anotación activa (nil = mover/redimensionar normal).
     @State private var tool: ShapeContent.Kind? = nil
+    @State private var zoomMode = false
 
     // Barra de anotaciones sobre la previsualización: eliges la herramienta y
     // arrastras sobre el vídeo para dibujarla. Se apaga sola tras dibujar.
@@ -227,16 +228,47 @@ struct VideoEditorView: View {
                 .foregroundColor(.white)
                 .help(kind.label)
             }
-            if tool != nil {
-                Text("arrastra sobre el vídeo")
+            Divider().frame(height: 16)
+            // Zoom: se señala la zona en la imagen, no con cuatro deslizadores.
+            Button(action: { zoomMode.toggle(); tool = nil }) {
+                Image(systemName: "plus.magnifyingglass").frame(width: 22, height: 20)
+            }
+            .buttonStyle(.plain)
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(zoomMode ? Color.cyan : Color.black.opacity(0.45)))
+            .foregroundColor(.white)
+            .help("Zoom: arrastra sobre la zona a la que quieras acercarte en este tramo")
+            Button(action: { resetZoom() }) {
+                Image(systemName: "minus.magnifyingglass").frame(width: 22, height: 20)
+            }
+            .buttonStyle(.plain)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.45)))
+            .foregroundColor(.white)
+            .help("Volver al 100 % en este tramo")
+
+            if tool != nil || zoomMode {
+                Text(zoomMode ? "encuadra la zona del zoom" : "arrastra sobre el vídeo")
                     .font(.system(size: 10))
-                    .foregroundColor(.yellow)
+                    .foregroundColor(zoomMode ? .cyan : .yellow)
                     .padding(.leading, 4)
             }
         }
         .padding(5)
         .background(RoundedRectangle(cornerRadius: 8).fill(.black.opacity(0.4)))
         .padding(.top, 8)
+    }
+
+    private func resetZoom() {
+        var p = state.project
+        let seg = p.segmentIndex(at: playhead)
+        guard p.layouts.indices.contains(seg) else { return }
+        p.layouts[seg].screen.fit = .fill
+        p.layouts[seg].screen.crop = SourceCrop()
+        p.layouts[seg].camera.fit = .fill
+        p.layouts[seg].camera.crop = SourceCrop()
+        p.layouts[seg].zoomRampMs = 0
+        state.project = p
+        zoomMode = false
     }
 
     private func togglePlay() {
@@ -262,7 +294,8 @@ struct VideoEditorView: View {
                 if let player {
                     ZStack(alignment: .top) {
                         PlainPlayerSurface(player: player)
-                        LiveCanvasOverlay(state: state, playhead: $playhead, tool: $tool)
+                        LiveCanvasOverlay(state: state, playhead: $playhead,
+                                          tool: $tool, zoomMode: $zoomMode)
                         annotationBar
                     }
                     .background(Color.black)

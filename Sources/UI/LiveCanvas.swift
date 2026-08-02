@@ -19,6 +19,8 @@ struct LiveCanvasOverlay: View {
     // Herramienta de anotación activa: con una elegida, arrastrar sobre el
     // vídeo dibuja en vez de mover.
     @Binding var tool: ShapeContent.Kind?
+    // Modo zoom: arrastrar encuadra la zona a la que acercarse en este tramo.
+    @Binding var zoomMode: Bool
 
     // Arrastre en curso: rect al empezar el gesto, para acumular la traslación.
     @State private var dragOrigin: NRect? = nil
@@ -32,7 +34,7 @@ struct LiveCanvasOverlay: View {
             ZStack(alignment: .topLeading) {
                 // Lienzo de dibujo: solo existe con una herramienta activa,
                 // así los gestos normales (mover, redimensionar) no se tocan.
-                if tool != nil {
+                if tool != nil || zoomMode {
                     Color.white.opacity(0.001)
                         .contentShape(Rectangle())
                         .gesture(
@@ -51,7 +53,8 @@ struct LiveCanvasOverlay: View {
                     if let s = drawStart, let n = drawNow {
                         // Vista previa del trazo mientras se arrastra.
                         Rectangle()
-                            .stroke(Color.yellow, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                            .stroke(zoomMode ? Color.cyan : Color.yellow,
+                                    style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
                             .frame(width: abs(n.x - s.x), height: abs(n.y - s.y))
                             .offset(x: min(s.x, n.x), y: min(s.y, n.y))
                             .allowsHitTesting(false)
@@ -73,12 +76,22 @@ struct LiveCanvasOverlay: View {
         }
     }
 
-    // Al soltar, la anotación entra como capa en el instante actual.
+    // Al soltar, la anotación entra como capa en el instante actual — o, en
+    // modo zoom, la zona dibujada pasa a ser el recorte del tramo.
     private func finishDrawing(start: CGPoint, end: CGPoint, canvas: CGRect) {
-        guard let kind = tool, canvas.width > 0, canvas.height > 0 else { return }
+        guard canvas.width > 0, canvas.height > 0 else { return }
         let minX = min(start.x, end.x), minY = min(start.y, end.y)
         let w = abs(end.x - start.x), h = abs(end.y - start.y)
         guard w > 6, h > 6 else { return }
+
+        if zoomMode {
+            applyZoom(x: (minX - canvas.minX) / canvas.width,
+                      y: (minY - canvas.minY) / canvas.height,
+                      w: w / canvas.width, h: h / canvas.height)
+            zoomMode = false
+            return
+        }
+        guard let kind = tool else { return }
         // La flecha va de donde empezaste a donde soltaste, no de esquina fija.
         let nrect = NRect(x: (minX - canvas.minX) / canvas.width,
                           y: (minY - canvas.minY) / canvas.height,
@@ -99,6 +112,39 @@ struct LiveCanvasOverlay: View {
         state.project = p
         state.selectedLayerID = layer.id
         tool = nil   // una anotación por clic de herramienta
+    }
+
+    // La zona dibujada se convierte en el recorte de la fuente que se está
+    // viendo: recortar al 40 % centrado en una zona ES acercarse a esa zona,
+    // y solo en este tramo. El motor ya existía; faltaba poder señalarla.
+    private func applyZoom(x: Double, y: Double, w: Double, h: Double) {
+        var p = state.project
+        let seg = p.segmentIndex(at: playhead)
+        guard p.layouts.indices.contains(seg) else { return }
+        var crop = SourceCrop(x: x, y: y, width: w, height: h).clamped()
+        // El lienzo es 16:9: el recorte se ajusta a esa forma para que la
+        // imagen no salga deformada al ampliarla.
+        let target = 16.0 / 9.0
+        if crop.width / crop.height > target {
+            let newH = min(1, crop.width / target)
+            crop.y = max(0, min(1 - newH, crop.y + (crop.height - newH) / 2))
+            crop.height = newH
+        } else {
+            let newW = min(1, crop.height * target)
+            crop.x = max(0, min(1 - newW, crop.x + (crop.width - newW) / 2))
+            crop.width = newW
+        }
+        // Se acerca la fuente que manda en este tramo.
+        switch p.layouts[seg].mode {
+        case .onlyCamera:
+            p.layouts[seg].camera.fit = .crop
+            p.layouts[seg].camera.crop = crop
+        default:
+            p.layouts[seg].screen.fit = .crop
+            p.layouts[seg].screen.crop = crop
+        }
+        if p.layouts[seg].zoomRampMs == 0 { p.layouts[seg].zoomRampMs = 400 }
+        state.project = p
     }
 
     // Rect del vídeo 16:9 centrado dentro de la vista (letterbox manual).

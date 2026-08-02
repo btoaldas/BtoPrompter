@@ -87,6 +87,34 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
     RunLoop.main.run()
 }
 
+// Quitar el sonido del sistema del micrófono, después de grabar.
+//   --test-echo <carpeta-de-grabación>
+if let i = CommandLine.arguments.firstIndex(of: "--test-echo"), CommandLine.arguments.count > i + 1 {
+    setbuf(stdout, nil)
+    let folder = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+    let files = (try? FileManager.default.contentsOfDirectory(at: folder,
+                                                              includingPropertiesForKeys: nil)) ?? []
+    guard let mic = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") }),
+          let ref = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") }) else {
+        print("ERROR: hacen falta la cámara (micrófono) y la pantalla (referencia)")
+        exit(1)
+    }
+    let out = folder.appendingPathComponent("voz-limpia.wav")
+    do {
+        let r = try AudioEchoRemover.removeSystemAudio(micURL: mic, referenceURL: ref,
+                                                       outputURL: out) { print("  \($0)") }
+        print(String(format: "niveles: micro %.5f → limpio %.5f", r.micRMS, r.cleanRMS))
+        print(String(format: "muestras: micro %d, referencia %d", r.micCount, r.refCount))
+        print(String(format: "retardo detectado: %.3f s", r.delaySeconds))
+        print(String(format: "cambio de nivel: %.1f dB", r.reductionDB))
+        print("salida: \(r.outputURL.path)")
+        exit(0)
+    } catch {
+        print("ERROR: \(error.localizedDescription)")
+        exit(1)
+    }
+}
+
 // Subtítulos desde el AUDIO de una grabación (sin teleprompter).
 //   --test-transcribe <carpeta-de-grabación>
 if let i = CommandLine.arguments.firstIndex(of: "--test-transcribe"), CommandLine.arguments.count > i + 1 {

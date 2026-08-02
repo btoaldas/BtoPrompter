@@ -102,8 +102,23 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                 ?? CompositionParameters.shared.project
             let seconds = request.compositionTime.seconds
             let segIdx = project.segmentIndex(at: seconds)
-            let layout = project.layouts.indices.contains(segIdx)
+            var layout = project.layouts.indices.contains(segIdx)
                 ? project.layouts[segIdx] : SegmentLayout()
+            // Acercamiento suave: durante los primeros milisegundos del tramo
+            // el recorte se interpola desde el encuadre completo.
+            if layout.zoomRampMs > 0 {
+                let start = project.segmentRange(segIdx).start
+                let ramp = layout.zoomRampMs / 1000
+                if seconds < start + ramp {
+                    let p = max(0, min(1, (seconds - start) / ramp))
+                    if layout.screen.fit == .crop {
+                        layout.screen.crop = layout.screen.crop.ramped(progress: p)
+                    }
+                    if layout.camera.fit == .crop {
+                        layout.camera.crop = layout.camera.crop.ramped(progress: p)
+                    }
+                }
+            }
 
             let screen = instruction.screenTrack == kCMPersistentTrackID_Invalid ? nil
                 : request.sourceFrame(byTrackID: instruction.screenTrack).map { CIImage(cvPixelBuffer: $0) }

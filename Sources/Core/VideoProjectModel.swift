@@ -109,6 +109,7 @@ struct SegmentLayout: Codable, Equatable {
         splitRatio = try c.decodeIfPresent(Double.self, forKey: .splitRatio) ?? 0.5
         camera = try c.decodeIfPresent(SourceSettings.self, forKey: .camera) ?? SourceSettings()
         screen = try c.decodeIfPresent(SourceSettings.self, forKey: .screen) ?? SourceSettings()
+        zoomRampMs = try c.decodeIfPresent(Double.self, forKey: .zoomRampMs) ?? 0
     }
 
     enum TransitionKind: String, Codable, CaseIterable {
@@ -132,16 +133,37 @@ struct SegmentLayout: Codable, Equatable {
     var splitRatio: Double = 0.5
     var camera = SourceSettings()
     var screen = SourceSettings()
+    // Acercamiento suave al entrar al tramo: el recorte crece desde el
+    // encuadre completo hasta el elegido en estos milisegundos (0 = salto).
+    var zoomRampMs: Double = 0
 
     func sanitized() -> SegmentLayout {
         var l = self
         l.transitionMs = min(2000, max(100, l.transitionMs))
+        l.zoomRampMs = min(3000, max(0, l.zoomRampMs))
         l.splitRatio = min(0.8, max(0.2, l.splitRatio))
         l.camRect = l.camRect.clamped(minSide: 0.06)
         l.borderWidth = min(0.05, max(0, l.borderWidth))
         l.camera.crop = l.camera.crop.clamped()
         l.screen.crop = l.screen.crop.clamped()
         return l
+    }
+}
+
+extension SourceCrop {
+    // Recorte a mitad de camino entre el encuadre completo y el elegido.
+    // progreso 0 = todo el fotograma, 1 = el recorte final. Es lo que hace
+    // que el zoom se acerque en vez de saltar.
+    func ramped(progress: Double) -> SourceCrop {
+        let p = min(1, max(0, progress))
+        guard p < 1 else { return self }
+        let full = SourceCrop()
+        var c = SourceCrop()
+        c.x = full.x + (x - full.x) * p
+        c.y = full.y + (y - full.y) * p
+        c.width = full.width + (width - full.width) * p
+        c.height = full.height + (height - full.height) * p
+        return c
     }
 }
 
