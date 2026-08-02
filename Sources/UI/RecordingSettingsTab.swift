@@ -14,6 +14,7 @@ struct RecordingSettingsTab: View {
     @State private var sysAudio = Settings.bool(.recordSystemAudio, default: false)
     @State private var audioCopies = Settings.bool(.recordAudioCopies, default: false)
     @State private var chapters = Settings.bool(.recordChapters, default: false)
+    @State private var autoPlay = Settings.bool(.recordAutoPlayPrompter, default: true)
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
     @State private var cameraDevice = Settings.string(.recordCameraDevice, default: "")
     @State private var cameras: [(id: String, name: String)] = []
@@ -70,6 +71,8 @@ struct RecordingSettingsTab: View {
                         Text("10 segundos").tag(10)
                     }
                     .onChange(of: countdown) { v in Settings.set(v, .recordCountdown) }
+                    Toggle("Arrancar el teleprompter al empezar a grabar", isOn: $autoPlay)
+                        .onChange(of: autoPlay) { v in Settings.set(v, .recordAutoPlayPrompter) }
                     Toggle("Capítulos automáticos al cruzar cada guía", isOn: $chapters)
                         .onChange(of: chapters) { v in Settings.set(v, .recordChapters) }
                     Text("Queda un capitulos.txt junto a los vídeos con la hora de cada sección.")

@@ -70,6 +70,11 @@ final class RecordingEngine: NSObject, ObservableObject {
     static var wantChapters: Bool { Settings.bool(.recordChapters, default: false) }
     static var wantSystemAudio: Bool { Settings.bool(.recordSystemAudio, default: false) }
     static var wantAudioCopies: Bool { Settings.bool(.recordAudioCopies, default: false) }
+    // Al terminar la cuenta regresiva, el teleprompter arranca solo: si
+    // estás grabando es porque vas a hablar. Se puede apagar en Ajustes.
+    static var wantAutoPlayPrompter: Bool {
+        Settings.bool(.recordAutoPlayPrompter, default: true)
+    }
     static var countdownSeconds: Int { Settings.int(.recordCountdown, default: 3) }
 
     // Carpeta accesible sin abrir la app: Películas/BtoPrompter.
@@ -190,6 +195,15 @@ final class RecordingEngine: NSObject, ObservableObject {
             }
             self.phase = .recording
             self.status = "Grabando " + pieces.sorted().joined(separator: " + ")
+            // El prompter arranca con la grabación: nada de grabar diez
+            // segundos de silencio buscando la tecla de play. Solo si ya
+            // estás en el prompter y no se está reproduciendo.
+            if Self.wantAutoPlayPrompter {
+                let model = PrompterModel.shared
+                if model.mode == .prompting, !model.isPlaying {
+                    model.play()
+                }
+            }
         }
     }
 
