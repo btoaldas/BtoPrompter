@@ -118,6 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             RemoteControl.shared.start()
         }
 
+        // Mando flotante de grabación (si la grabación está activada).
+        RecordingHUDController.shared.showIfNeeded()
+
         if CommandLine.arguments.contains("--autostart") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 model.startPrompter()
@@ -191,6 +194,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    @objc func togglePauseRecording() {
+        MainActor.assumeIsolated {
+            RecordingEngine.shared.togglePause()
+        }
+    }
+
+    @objc func toggleRecordingHUD() {
+        MainActor.assumeIsolated {
+            RecordingHUDController.shared.toggleVisible()
+        }
+    }
+
     @objc func openVideoEditor() {
         MainActor.assumeIsolated {
             VideoEditorWindowController.shared.open()
@@ -240,6 +255,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if Settings.bool(.recordingEnabled, default: false) {
             appMenu.addItem(NSMenuItem(title: "Grabar / Detener grabación",
                                        action: #selector(toggleRecording), keyEquivalent: "r"))
+            let pauseItem = NSMenuItem(title: "Pausar / Reanudar grabación",
+                                       action: #selector(togglePauseRecording), keyEquivalent: "R")
+            appMenu.addItem(pauseItem)
+            appMenu.addItem(NSMenuItem(title: "Mostrar / ocultar el mando de grabación",
+                                       action: #selector(toggleRecordingHUD), keyEquivalent: ""))
             appMenu.addItem(NSMenuItem.separator())
         }
         // Solo existe con el editor activado en Ajustes; apagado = ni menú.

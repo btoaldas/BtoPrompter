@@ -172,16 +172,70 @@ struct LayerAppearance: Codable, Equatable {
     var to: Double
 }
 
+// Anotaciones de curso: lo que se dibuja ENCIMA del vídeo para señalar,
+// subrayar, escribir o tapar. Se guardan como una capa más, así heredan
+// gratis los intervalos de aparición, el orden por tramo y el lienzo vivo.
+struct ShapeContent: Codable, Equatable {
+    enum Kind: String, Codable, CaseIterable {
+        case arrow          // flecha que señala
+        case rect           // recuadro
+        case ellipse        // círculo/elipse
+        case underline      // subrayado
+        case text           // texto suelto
+        case strikethrough  // tachado
+        case blur           // pixelado/borroso: tapa datos sensibles
+
+        var label: String {
+            switch self {
+            case .arrow: return "Flecha"
+            case .rect: return "Recuadro"
+            case .ellipse: return "Elipse"
+            case .underline: return "Subrayado"
+            case .text: return "Texto"
+            case .strikethrough: return "Tachado"
+            case .blur: return "Pixelar"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .arrow: return "arrow.up.right"
+            case .rect: return "rectangle"
+            case .ellipse: return "circle"
+            case .underline: return "underline"
+            case .text: return "textformat"
+            case .strikethrough: return "strikethrough"
+            case .blur: return "eye.slash"
+            }
+        }
+    }
+
+    var kind: Kind = .arrow
+    var color = RGBA(r: 1, g: 0.23, b: 0.19)     // rojo señalador
+    var thickness: Double = 0.006                 // fracción del lado menor
+    var text: String = ""                         // solo para .text
+    // Pixelar en bloques (true) o desenfocar (false).
+    var pixelate = true
+
+    func sanitized() -> ShapeContent {
+        var s = self
+        s.thickness = min(0.05, max(0.001, s.thickness))
+        return s
+    }
+}
+
 // Una capa añadida por el usuario: un vídeo o una imagen suya, con su
 // posición, su forma, su orden y SUS TIEMPOS — aparece y desaparece cuando
 // él decida, las veces que decida.
 struct ExtraLayer: Codable, Equatable, Identifiable {
-    enum Kind: String, Codable { case video, image }
+    enum Kind: String, Codable { case video, image, shape }
 
     var id = UUID()
     var kind: Kind
     var path: String
     var name: String
+    // Solo para kind == .shape: qué se dibuja.
+    var shapeContent: ShapeContent? = nil
     var rect = NRect(x: 0.62, y: 0.6, width: 0.32, height: 0.32)
     var settings = SourceSettings()
     var shape: SegmentLayout.Shape = .rect
@@ -205,7 +259,8 @@ struct ExtraLayer: Codable, Equatable, Identifiable {
 
     func sanitized(duration: Double) -> ExtraLayer {
         var l = self
-        l.rect = l.rect.clamped(minSide: 0.03)
+        l.shapeContent = l.shapeContent?.sanitized()
+        l.rect = l.rect.clamped(minSide: 0.01)
         l.opacity = min(1, max(0.05, l.opacity))
         l.borderWidth = min(0.05, max(0, l.borderWidth))
         l.settings.crop = l.settings.crop.clamped()

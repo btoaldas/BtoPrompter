@@ -87,6 +87,32 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
     RunLoop.main.run()
 }
 
+// Prueba aislada del micrófono con cancelación de eco.
+//   --test-mic-clean <salida.m4a> <segundos>
+if let i = CommandLine.arguments.firstIndex(of: "--test-mic-clean"), CommandLine.arguments.count > i + 2 {
+    setbuf(stdout, nil)
+    let out = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    let secs = Double(CommandLine.arguments[i + 2]) ?? 5
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let rec = VoiceIsolatedRecorder()
+    DispatchQueue.main.async {
+        let cancel = !CommandLine.arguments.contains("--sin-aec")
+        let ok = rec.start(to: out, cancelEcho: cancel)
+        print("cancelación de eco: \(cancel ? "SÍ" : "no")")
+        print("arranque: \(ok ? "OK" : "FALLÓ") \(rec.lastError ?? "")")
+        guard ok else { exit(1) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + secs) {
+            rec.stop()
+            let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int) ?? 0
+            print("archivo: \(size ?? 0) bytes")
+            if let e = rec.lastError { print("último error: \(e)") }
+            exit(0)
+        }
+    }
+    app.run()
+}
+
 // Subtítulos desde el AUDIO de una grabación (sin teleprompter).
 //   --test-transcribe <carpeta-de-grabación>
 if let i = CommandLine.arguments.firstIndex(of: "--test-transcribe"), CommandLine.arguments.count > i + 1 {

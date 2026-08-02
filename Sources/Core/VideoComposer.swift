@@ -123,6 +123,8 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                     }
                 case .image:
                     layerImages[layer.id] = FrameComposer.layerImage(layer.path)
+                case .shape:
+                    break   // se dibuja sola, no necesita imagen de origen
                 }
             }
 
@@ -202,7 +204,13 @@ enum FrameComposer {
     private static func drawLayer(_ layer: ExtraLayer, image: CIImage?,
                                   at seconds: Double, over result: CIImage,
                                   canvas: CGSize) -> CIImage {
-        guard layer.isVisible(at: seconds), let image else { return result }
+        guard layer.isVisible(at: seconds) else { return result }
+        // Las anotaciones se dibujan solas; el pixelado necesita ver lo que
+        // hay debajo, así que recibe la composición actual.
+        if layer.kind == .shape, let content = layer.shapeContent {
+            return drawAnnotation(content, in: layer.rect, over: result, canvas: canvas)
+        }
+        guard let image else { return result }
         let rect = ciRect(layer.rect.cgRect, canvas: canvas)
         let side = min(rect.width, rect.height)
         let window = layer.shape == .circle
@@ -224,6 +232,115 @@ enum FrameComposer {
     // Imagen de una capa (cacheada igual que el fondo).
     static func layerImage(_ path: String) -> CIImage? {
         cachedImage(path)
+    }
+
+    // MARK: Anotaciones
+
+    // Las siete anotaciones de curso. El pixelado opera SOBRE lo compuesto
+    // (tapa lo que hay debajo); el resto se dibuja encima con CGContext y se
+    // cachea por geometría, igual que las máscaras.
+    private static let annotationCache = NSCache<NSString, CIImage>()
+
+    static func drawAnnotation(_ content: ShapeContent, in nrect: NRect,
+                               over base: CIImage, canvas: CGSize) -> CIImage {
+        let rect = ciRect(nrect.cgRect, canvas: canvas)
+        guard rect.width > 1, rect.height > 1 else { return base }
+
+        // Pixelar / desenfocar: se toma la zona de la imagen ya compuesta.
+        if content.kind == .blur {
+            let region = base.cropped(to: rect)
+            let processed: CIImage?
+            if content.pixelate {
+                let scale = max(8, min(rect.width, rect.height) / 12)
+                processed = region.applyingFilter("CIPixellate", parameters: [
+                    kCIInputCenterKey: CIVector(x: rect.midX, y: rect.midY),
+                    kCIInputScaleKey: scale,
+                ]).cropped(to: rect)
+            } else {
+                processed = region
+                    .clampedToExtent()
+                    .applyingFilter("CIGaussianBlur",
+                                    parameters: [kCIInputRadiusKey: max(6, rect.width / 20)])
+                    .cropped(to: rect)
+            }
+            return (processed ?? region).composited(over: base)
+        }
+
+        let key = "\(content.kind.rawValue)|\(content.text)|\(content.thickness)|"
+            + "\(content.color.r),\(content.color.g),\(content.color.b)|"
+            + "\(Int(rect.width))x\(Int(rect.height))|\(Int(rect.minX)),\(Int(rect.minY))|"
+            + "\(Int(canvas.width))" as NSString
+        if let hit = annotationCache.object(forKey: key) {
+            return hit.composited(over: base)
+        }
+
+        let w = Int(canvas.width), h = Int(canvas.height)
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return base
+        }
+        let color = CGColor(red: content.color.r, green: content.color.g,
+                            blue: content.color.b, alpha: 1)
+        let line = max(1, content.thickness * min(canvas.width, canvas.height))
+        ctx.setStrokeColor(color)
+        ctx.setFillColor(color)
+        ctx.setLineWidth(line)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+
+        switch content.kind {
+        case .rect:
+            ctx.stroke(rect.insetBy(dx: line / 2, dy: line / 2))
+        case .ellipse:
+            ctx.strokeEllipse(in: rect.insetBy(dx: line / 2, dy: line / 2))
+        case .underline:
+            // Línea gruesa pegada al borde inferior del recuadro.
+            ctx.move(to: CGPoint(x: rect.minX, y: rect.minY + line))
+            ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + line))
+            ctx.strokePath()
+        case .strikethrough:
+            ctx.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            ctx.strokePath()
+        case .arrow:
+            // De la esquina superior izquierda a la inferior derecha del
+            // recuadro: mover el recuadro mueve y gira la flecha.
+            let from = CGPoint(x: rect.minX, y: rect.maxY)
+            let to = CGPoint(x: rect.maxX, y: rect.minY)
+            ctx.move(to: from)
+            ctx.addLine(to: to)
+            ctx.strokePath()
+            let angle = atan2(to.y - from.y, to.x - from.x)
+            let head = max(line * 3.5, min(rect.width, rect.height) * 0.28)
+            for side in [CGFloat.pi * 0.82, -CGFloat.pi * 0.82] {
+                ctx.move(to: to)
+                ctx.addLine(to: CGPoint(x: to.x + cos(angle + side) * head,
+                                        y: to.y + sin(angle + side) * head))
+            }
+            ctx.strokePath()
+        case .text:
+            let size = max(12, rect.height * 0.7)
+            let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, size, nil)
+            let attributed = NSAttributedString(string: content.text, attributes: [
+                .font: font, .foregroundColor: color,
+            ])
+            ctx.setShadow(offset: CGSize(width: 0, height: -size * 0.05),
+                          blur: size * 0.14,
+                          color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.8))
+            let setter = CTFramesetterCreateWithAttributedString(attributed)
+            let path = CGPath(rect: rect, transform: nil)
+            let frame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), path, nil)
+            CTFrameDraw(frame, ctx)
+        case .blur:
+            break   // ya tratado arriba
+        }
+
+        guard let cg = ctx.makeImage() else { return base }
+        let image = CIImage(cgImage: cg)
+        annotationCache.setObject(image, forKey: key)
+        return image.composited(over: base)
     }
 
     private static func composeBase(screen: CIImage?, camera: CIImage?,
@@ -591,6 +708,8 @@ enum CompositionBuilder {
         let screenURL: URL?
         let cameraURL: URL?
         let offsetSeconds: Double   // pantalla − cámara, del sync.json
+        // Micrófono grabado aparte con cancelación de eco, si lo hay.
+        var cleanMicURL: URL? = nil
     }
 
     // Carga una carpeta de grabación (los dos .mov + sync.json). Las fuentes
@@ -621,7 +740,9 @@ enum CompositionBuilder {
         // Con UNA sola pieza también se puede componer (recortes y fondo
         // siguen valiendo); la grabación de fábrica es solo-cámara.
         guard cam != nil || scr != nil else { return nil }
-        return Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset)
+        let cleanMic = files.first { $0.lastPathComponent.hasPrefix("microfono-") }
+        return Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset,
+                       cleanMicURL: cleanMic)
     }
 
     // Composición alineada y recortada a la pista más corta. La regla dura:
@@ -677,9 +798,11 @@ enum CompositionBuilder {
             cameraID = vCamera.trackID
         }
 
-        // El audio del micrófono vive en el archivo de cámara, con su volumen.
+        // El micrófono: el archivo limpio (sin eco del sistema) si existe, si
+        // no el que va dentro del archivo de cámara.
         var mixParams: [AVMutableAudioMixInputParameters] = []
-        if let audio = try await cameraAsset?.loadTracks(withMediaType: .audio).first {
+        let micAsset: AVURLAsset? = src.cleanMicURL.map { AVURLAsset(url: $0) } ?? cameraAsset
+        if let audio = try await micAsset?.loadTracks(withMediaType: .audio).first {
             let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
             try aTrack.insertTimeRange(
                 CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),

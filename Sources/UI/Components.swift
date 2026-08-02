@@ -167,6 +167,9 @@ struct RecordButton: View {
                 case .recording:
                     Image(systemName: "stop.circle.fill")
                         .foregroundColor(.red)
+                case .paused:
+                    Image(systemName: "play.circle.fill")
+                        .foregroundColor(.orange)
                 case .stopping:
                     ProgressView().controlSize(.small)
                 }

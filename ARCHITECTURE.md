@@ -72,7 +72,10 @@ Sources/
 - **NSPanel no-activante** (no NSWindow): es lo que permite flotar sobre apps
   en pantalla completa y no robar el foco de la presentación. No cambiar.
 - **`sharingType = .none`**: la invisibilidad al compartir pantalla. El toggle
-  del ojo lo conmuta en caliente.
+  del ojo lo conmuta en caliente en el panel del prompter (único escritor:
+  `AppDelegate.applySharingType`). El mando flotante de grabación lo fija a
+  `.none` de forma permanente y sin interruptor: es un control de quien graba,
+  nunca contenido del vídeo.
 - **Secretos en `secrets.json` (0600)** y no en el Llavero: la firma ad-hoc de
   desarrollo cambia en cada build y el Llavero pediría autorización cada vez.
   Nunca en UserDefaults (hay migración automática desde versiones previas).

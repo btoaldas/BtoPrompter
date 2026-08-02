@@ -19,6 +19,7 @@ final class RecordingEngine: NSObject, ObservableObject {
         case idle
         case countdown(Int)
         case recording
+        case paused
         case stopping
     }
 
@@ -45,6 +46,8 @@ final class RecordingEngine: NSObject, ObservableObject {
     private var screenOutput: Any?
 
     private var countdownWork: DispatchWorkItem?
+    // Micrófono con cancelación de eco (camino alternativo al de la cámara).
+    private let cleanMic = VoiceIsolatedRecorder()
     // Detecta el PRIMER fotograma real de la cámara. session.isRunning se pone
     // en true antes de que fluya imagen; grabar en ese hueco pierde el inicio.
     private final class FrameSentinel: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -70,6 +73,10 @@ final class RecordingEngine: NSObject, ObservableObject {
     static var wantChapters: Bool { Settings.bool(.recordChapters, default: false) }
     static var wantSystemAudio: Bool { Settings.bool(.recordSystemAudio, default: false) }
     static var wantAudioCopies: Bool { Settings.bool(.recordAudioCopies, default: false) }
+    // Cancelar el eco: el micrófono deja de captar lo que suena en el Mac.
+    static var wantEchoCancellation: Bool {
+        Settings.bool(.recordEchoCancellation, default: false)
+    }
     // Al terminar la cuenta regresiva, el teleprompter arranca solo: si
     // estás grabando es porque vas a hablar. Se puede apagar en Ajustes.
     static var wantAutoPlayPrompter: Bool {
@@ -91,9 +98,61 @@ final class RecordingEngine: NSObject, ObservableObject {
         switch phase {
         case .idle: start()
         case .countdown: cancelCountdown()
-        case .recording: stop()
+        case .recording, .paused: stop()
         case .stopping: break
         }
+    }
+
+    // Pausa LÓGICA: las cámaras siguen rodando (pararlas y rearrancarlas
+    // desincronizaría cámara y pantalla, que es lo que más costó cuadrar),
+    // pero el tramo queda marcado y el teleprompter se detiene. El editor
+    // recibe las marcas para poder cortarlas.
+    @Published var elapsedText = "0:00"
+    private var pausedRanges: [(from: Double, to: Double)] = []
+    private var pauseStartedAt: Double? = nil
+    private var tickTimer: Timer?
+
+    func togglePause() {
+        guard let start = startedAt else { return }
+        let now = Date().timeIntervalSince(start)
+        switch phase {
+        case .recording:
+            pauseStartedAt = now
+            phase = .paused
+            if Self.wantAutoPlayPrompter, PrompterModel.shared.isPlaying {
+                PrompterModel.shared.pause()
+            }
+        case .paused:
+            if let from = pauseStartedAt {
+                pausedRanges.append((from, now))
+            }
+            pauseStartedAt = nil
+            phase = .recording
+            let model = PrompterModel.shared
+            if Self.wantAutoPlayPrompter, model.mode == .prompting, !model.isPlaying {
+                model.play()
+            }
+        default: break
+        }
+    }
+
+    private func startTicking() {
+        tickTimer?.invalidate()
+        tickTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.startedAt else { return }
+                let s = Int(Date().timeIntervalSince(start))
+                self.elapsedText = String(format: "%d:%02d", s / 60, s % 60)
+            }
+        }
+    }
+
+    private func writePauses() {
+        guard !pausedRanges.isEmpty, let folder = lastFolder else { return }
+        let payload = pausedRanges.map { ["from": $0.from, "to": $0.to] }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload,
+                                                     options: [.prettyPrinted]) else { return }
+        try? data.write(to: folder.appendingPathComponent("pausas.json"))
     }
 
     func start() {
@@ -176,6 +235,18 @@ final class RecordingEngine: NSObject, ObservableObject {
                 return
             }
             self.startedAt = Date()
+            // Micrófono limpio: se arranca junto a las cámaras. Si el sistema
+            // no puede con la cancelación de eco, se avisa y la toma sigue.
+            if Self.wantMic, Self.wantEchoCancellation {
+                let micURL = folder.appendingPathComponent("microfono-\(stamp).caf")
+                if !self.cleanMic.start(to: micURL) {
+                    self.status = self.cleanMic.lastError ?? "Sin cancelación de eco"
+                }
+            }
+            self.pausedRanges = []
+            self.pauseStartedAt = nil
+            self.elapsedText = "0:00"
+            self.startTicking()
             // La cámara es la lenta: arranca primero, y la pantalla (que
             // escribe al instante porque su captura ya corre) espera a que la
             // cámara confirme su primer fotograma. Así los dos archivos
@@ -252,7 +323,13 @@ final class RecordingEngine: NSObject, ObservableObject {
     }
 
     func stop() {
-        guard phase == .recording else { return }
+        guard phase == .recording || phase == .paused else { return }
+        if phase == .paused, let start = startedAt, let from = pauseStartedAt {
+            pausedRanges.append((from, Date().timeIntervalSince(start)))
+            pauseStartedAt = nil
+        }
+        tickTimer?.invalidate()
+        tickTimer = nil
         phase = .stopping
         let group = DispatchGroup()
 
@@ -272,12 +349,14 @@ final class RecordingEngine: NSObject, ObservableObject {
     }
 
     private func finishStop() {
+        cleanMic.stop()
         cameraSession?.stopRunning()
         cameraSession = nil
         cameraOutput = nil
         screenStream = nil
         screenOutput = nil
         writeChapters()
+        writePauses()
         writeSubtitleTrack()
         extractAudioCopies()
         phase = .idle
@@ -313,7 +392,11 @@ final class RecordingEngine: NSObject, ObservableObject {
             return
         }
         session.addInput(input)
-        if Self.wantMic, let mic = AVCaptureDevice.default(for: .audio),
+        // Con la cancelación de eco el micrófono se graba aparte (limpio); si
+        // también entrara por la cámara, tendríamos la voz duplicada, una
+        // sucia y otra limpia.
+        if Self.wantMic, !Self.wantEchoCancellation,
+           let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
            session.canAddInput(micInput) {
             session.addInput(micInput)

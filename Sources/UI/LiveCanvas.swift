@@ -16,14 +16,47 @@ import SwiftUI
 struct LiveCanvasOverlay: View {
     @ObservedObject var state: VideoProjectState
     @Binding var playhead: Double
+    // Herramienta de anotación activa: con una elegida, arrastrar sobre el
+    // vídeo dibuja en vez de mover.
+    @Binding var tool: ShapeContent.Kind?
 
     // Arrastre en curso: rect al empezar el gesto, para acumular la traslación.
     @State private var dragOrigin: NRect? = nil
+    // Esquina donde empezó el trazo de una anotación nueva.
+    @State private var drawStart: CGPoint? = nil
+    @State private var drawNow: CGPoint? = nil
 
     var body: some View {
         GeometryReader { geo in
             let canvas = Self.videoRect(in: geo.size)
             ZStack(alignment: .topLeading) {
+                // Lienzo de dibujo: solo existe con una herramienta activa,
+                // así los gestos normales (mover, redimensionar) no se tocan.
+                if tool != nil {
+                    Color.white.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { g in
+                                    if drawStart == nil { drawStart = g.startLocation }
+                                    drawNow = g.location
+                                }
+                                .onEnded { g in
+                                    finishDrawing(start: g.startLocation, end: g.location,
+                                                  canvas: canvas)
+                                    drawStart = nil
+                                    drawNow = nil
+                                }
+                        )
+                    if let s = drawStart, let n = drawNow {
+                        // Vista previa del trazo mientras se arrastra.
+                        Rectangle()
+                            .stroke(Color.yellow, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                            .frame(width: abs(n.x - s.x), height: abs(n.y - s.y))
+                            .offset(x: min(s.x, n.x), y: min(s.y, n.y))
+                            .allowsHitTesting(false)
+                    }
+                }
                 // Cámara flotante del tramo BAJO EL CURSOR (lo que se ve).
                 let segIdx = state.project.segmentIndex(at: playhead)
                 if state.project.layouts.indices.contains(segIdx),
@@ -38,6 +71,34 @@ struct LiveCanvasOverlay: View {
                 }
             }
         }
+    }
+
+    // Al soltar, la anotación entra como capa en el instante actual.
+    private func finishDrawing(start: CGPoint, end: CGPoint, canvas: CGRect) {
+        guard let kind = tool, canvas.width > 0, canvas.height > 0 else { return }
+        let minX = min(start.x, end.x), minY = min(start.y, end.y)
+        let w = abs(end.x - start.x), h = abs(end.y - start.y)
+        guard w > 6, h > 6 else { return }
+        // La flecha va de donde empezaste a donde soltaste, no de esquina fija.
+        let nrect = NRect(x: (minX - canvas.minX) / canvas.width,
+                          y: (minY - canvas.minY) / canvas.height,
+                          width: w / canvas.width,
+                          height: h / canvas.height).clamped(minSide: 0.01)
+        var content = ShapeContent()
+        content.kind = kind
+        if kind == .text { content.text = "Texto" }
+        var layer = ExtraLayer(kind: .shape, path: "", name: kind.label)
+        layer.shapeContent = content
+        layer.rect = nrect
+        // Nace visible desde este instante hasta el final del tramo actual.
+        let seg = state.project.segmentIndex(at: playhead)
+        let range = state.project.segmentRange(seg)
+        layer.appearances = [LayerAppearance(from: playhead, to: max(range.end, playhead + 2))]
+        var p = state.project
+        p.extraLayers.append(layer)
+        state.project = p
+        state.selectedLayerID = layer.id
+        tool = nil   // una anotación por clic de herramienta
     }
 
     // Rect del vídeo 16:9 centrado dentro de la vista (letterbox manual).

@@ -209,6 +209,35 @@ struct VideoEditorView: View {
     // Serializa prepare()/rebuild(): solo la construcción más reciente asigna.
     @State private var buildGeneration = 0
     @State private var isPlaying = false
+    // Herramienta de anotación activa (nil = mover/redimensionar normal).
+    @State private var tool: ShapeContent.Kind? = nil
+
+    // Barra de anotaciones sobre la previsualización: eliges la herramienta y
+    // arrastras sobre el vídeo para dibujarla. Se apaga sola tras dibujar.
+    private var annotationBar: some View {
+        HStack(spacing: 4) {
+            ForEach(ShapeContent.Kind.allCases, id: \.self) { kind in
+                Button(action: { tool = (tool == kind) ? nil : kind }) {
+                    Image(systemName: kind.symbol)
+                        .frame(width: 22, height: 20)
+                }
+                .buttonStyle(.plain)
+                .background(RoundedRectangle(cornerRadius: 5)
+                    .fill(tool == kind ? Color.accentColor : Color.black.opacity(0.45)))
+                .foregroundColor(.white)
+                .help(kind.label)
+            }
+            if tool != nil {
+                Text("arrastra sobre el vídeo")
+                    .font(.system(size: 10))
+                    .foregroundColor(.yellow)
+                    .padding(.leading, 4)
+            }
+        }
+        .padding(5)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.black.opacity(0.4)))
+        .padding(.top, 8)
+    }
 
     private func togglePlay() {
         guard let p = player else { return }
@@ -231,9 +260,10 @@ struct VideoEditorView: View {
         HSplitView {
             VStack(spacing: 0) {
                 if let player {
-                    ZStack {
+                    ZStack(alignment: .top) {
                         PlainPlayerSurface(player: player)
-                        LiveCanvasOverlay(state: state, playhead: $playhead)
+                        LiveCanvasOverlay(state: state, playhead: $playhead, tool: $tool)
+                        annotationBar
                     }
                     .background(Color.black)
                     .layoutPriority(1)

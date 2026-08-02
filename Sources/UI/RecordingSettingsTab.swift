@@ -13,6 +13,7 @@ struct RecordingSettingsTab: View {
     @State private var mic = Settings.bool(.recordMicInRecording, default: true)
     @State private var sysAudio = Settings.bool(.recordSystemAudio, default: false)
     @State private var audioCopies = Settings.bool(.recordAudioCopies, default: false)
+    @State private var echoCancel = Settings.bool(.recordEchoCancellation, default: false)
     @State private var chapters = Settings.bool(.recordChapters, default: false)
     @State private var autoPlay = Settings.bool(.recordAutoPlayPrompter, default: true)
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
@@ -53,6 +54,13 @@ struct RecordingSettingsTab: View {
                         .onChange(of: sysAudio) { v in Settings.set(v, .recordSystemAudio) }
                     Text("Con el sonido del sistema grabado, el editor puede mezclar la vista "
                          + "del escritorio con el audio que quieras: micrófono, sistema o ambos.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Cancelar el eco del sistema en el micrófono", isOn: $echoCancel)
+                        .onChange(of: echoCancel) { v in Settings.set(v, .recordEchoCancellation) }
+                    Text("Si mientras hablas suena algo en el Mac, el micrófono lo capta por "
+                         + "los altavoces y queda duplicado. Con esto el micrófono se graba "
+                         + "aparte, limpio, con la misma tecnología que usan Zoom y Teams.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Toggle("Guardar además copias solo-audio (.m4a)", isOn: $audioCopies)
