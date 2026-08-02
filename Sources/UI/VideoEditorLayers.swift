@@ -687,6 +687,11 @@ struct SubtitleSection: View {
                     .font(.system(size: 10))
                     .help("Genera las frases desde lo que el teleprompter marcó al grabar")
                 }
+                Button("Transcribir el audio") { transcribeAudio() }
+                    .font(.system(size: 10))
+                    .disabled(transcriber.running)
+                    .help("Sin teleprompter: escucha la grabación y arma los "
+                          + "subtítulos con los tiempos de cada palabra")
                 Button("Archivo SRT…") { importSRT() }
                     .font(.system(size: 10))
                 if !track.chunks.isEmpty {
@@ -826,6 +831,29 @@ struct SubtitleSection: View {
                 state.project = p
                 aiStatus = "Doblaje listo: \(layers.count) frases como capas de audio"
                 NotificationCenter.default.post(name: .init("BtoPrompterRebuild"), object: nil)
+            case .failure(let error):
+                aiStatus = error.localizedDescription
+            }
+        }
+    }
+
+    @StateObject private var transcriber = SubtitleTranscriber.shared
+
+    // Transcribe el audio de la grabación: subtítulos sin haber leído guion.
+    private func transcribeAudio() {
+        guard let audio = SubtitleTranscriber.bestAudioSource(inFolder: state.folder) else {
+            aiStatus = "No se encontró audio en esta grabación"
+            return
+        }
+        aiStatus = "Transcribiendo…"
+        transcriber.transcribe(url: audio) { result in
+            switch result {
+            case .success(let chunks):
+                var t2 = track
+                t2.chunks = chunks
+                t2.enabled = true
+                setTrack(t2)
+                aiStatus = "\(chunks.count) frases desde el audio"
             case .failure(let error):
                 aiStatus = error.localizedDescription
             }

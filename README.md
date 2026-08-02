@@ -129,6 +129,7 @@ El vídeo se divide en **tramos de tiempo** y cada tramo tiene su propia receta:
 - **Sonido del sistema y copias solo-audio** (Ajustes → Grabación, apagados por defecto): graba también lo que suena en el Mac (va en el archivo de pantalla) y extrae copias sueltas `audio-webcam.m4a` / `audio-sistema.m4a` para usarlas donde quieras sin abrir el editor.
 - **Cortes arrastrables**: los marcadores de la línea de tiempo se agarran y se mueven, con imán a segundos enteros.
 - **Subtítulos** (activables por proyecto): generados **del propio teleprompter** — la app sabe qué palabra dijiste en qué segundo y arma las frases sola — o importados de un archivo SRT. Cinco modelos de estilo (Clásico TV, Formal, Juvenil, Invertido, Minimal) y todo configurable: posición arriba/medio/abajo, una o dos filas, ancho, tamaño, color, sombra y caja de fondo. **Por defecto NO se queman**: al exportar salen como `video.srt` separado junto al MP4, listo para subirlo a YouTube como pista (quemarlos es la opción, en la propia interfaz).
+- **Subtítulos SIN teleprompter**: pulsa «Transcribir el audio» y la app escucha tu grabación y arma las frases con el instante real de cada palabra — para tutoriales y clases hablando libre, sin guion. De ahí encadenan las traducciones y el doblaje.
 - **Traducciones con IA a los 10 idiomas más hablados** (español, inglés, chino, hindi, francés, árabe, bengalí, portugués, ruso, japonés): un clic y salen `video.en.srt`, `video.ja.srt`… con los tiempos reales intactos, usando el proveedor de IA que tú configures. Y **«Refinar con IA»**: puntuación, mayúsculas y cortes naturales sin tocar los tiempos.
 - **Doblaje con IA**: traduce tus frases y las sintetiza una a una con el proveedor de voz configurado (ElevenLabs, OpenAI…), cada frase alineada a su segundo real como capa de audio editable; el micrófono original se baja a cero y tú decides si lo devuelves. Avisa del costo (una llamada por frase) antes de lanzar.
 - **Presets estilo OBS en cuatro niveles**: guarda y aplica **características** (solo la apariencia de una capa), **componentes** (la capa completa), **escenas** (el tramo con sus capas) y **plantillas de proyecto entero**. Las plantillas nunca arrastran tus archivos: las capas quedan como «demo 1, demo 2…» y al aplicarlas eliges qué archivo va en cada hueco.
@@ -143,7 +144,7 @@ El proyecto se guarda en `project.json` junto a los `.mov`: cierra y retoma cuan
 
 ### Grabación de presentaciones
 
-En Configuración → Grabación: activa la función, elige qué grabar (cámara, pantalla o ambas) y desde dónde (botón en la barra del prompter, o el botón «Grabar» del teléfono). Cada grabación crea una carpeta con fecha y hora en `Películas/BtoPrompter`:
+En Configuración → Grabación: activa la función, elige qué grabar (cámara, pantalla o ambas) y desde dónde (botón en la barra del prompter, **menú «Grabar / Detener grabación» ⌘R para grabar sin teleprompter**, o el botón «Grabar» del teléfono). Al empezar a grabar el teleprompter arranca solo, si lo estabas usando. Cada grabación crea una carpeta con fecha y hora en `Películas/BtoPrompter`:
 
 ```
 2026-08-01-160809/

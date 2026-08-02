@@ -87,6 +87,37 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
     RunLoop.main.run()
 }
 
+// Subtítulos desde el AUDIO de una grabación (sin teleprompter).
+//   --test-transcribe <carpeta-de-grabación>
+if let i = CommandLine.arguments.firstIndex(of: "--test-transcribe"), CommandLine.arguments.count > i + 1 {
+    let folder = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+    guard let audio = SubtitleTranscriber.bestAudioSource(inFolder: folder) else {
+        print("ERROR: no hay audio en esa carpeta")
+        exit(1)
+    }
+    print("audio: \(audio.lastPathComponent)")
+    setbuf(stdout, nil)   // sin buffer: la salida se ve aunque el proceso siga vivo
+    // El permiso de reconocimiento necesita una app real para poder mostrar
+    // su diálogo la primera vez.
+    let transcribeApp = NSApplication.shared
+    transcribeApp.setActivationPolicy(.accessory)
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            SubtitleTranscriber.shared.transcribe(url: audio) { result in
+                switch result {
+                case .success(let chunks):
+                    print(SubtitleBuilder.toSRT(chunks))
+                    exit(0)
+                case .failure(let error):
+                    print("ERROR: \(error.localizedDescription)")
+                    exit(1)
+                }
+            }
+        }
+    }
+    transcribeApp.run()
+}
+
 // Traducción de subtítulos con la IA configurada: prueba reproducible.
 //   --test-translate <archivo.srt> <código-idioma>
 if let i = CommandLine.arguments.firstIndex(of: "--test-translate"), CommandLine.arguments.count > i + 2 {

@@ -185,6 +185,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setFrame(Theme.normalFrame(for: screen), display: true, animate: true)
     }
 
+    @objc func toggleRecording() {
+        MainActor.assumeIsolated {
+            RecordingEngine.shared.toggle()
+        }
+    }
+
     @objc func openVideoEditor() {
         MainActor.assumeIsolated {
             VideoEditorWindowController.shared.open()
@@ -229,6 +235,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
+        // Grabar SIN teleprompter: para tutoriales y clases hablando libre,
+        // sin pasar por el guion. Mismo motor y misma carpeta.
+        if Settings.bool(.recordingEnabled, default: false) {
+            appMenu.addItem(NSMenuItem(title: "Grabar / Detener grabación",
+                                       action: #selector(toggleRecording), keyEquivalent: "r"))
+            appMenu.addItem(NSMenuItem.separator())
+        }
         // Solo existe con el editor activado en Ajustes; apagado = ni menú.
         if Settings.bool(.videoEditorEnabled, default: false) {
             appMenu.addItem(NSMenuItem(title: "Componer grabación…",
