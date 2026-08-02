@@ -190,6 +190,32 @@ enum SubtitleBuilder {
         return result.filter { $0.to > $0.from }
     }
 
+    // Huecos donde nadie habló: entre el final de una frase y el principio
+    // de la siguiente. Sirven para proponer cortes y quitar los silencios,
+    // que es la mitad del trabajo de editar un tutorial.
+    static func silences(in chunks: [SubtitleChunk], minimum: Double = 1.5,
+                         margin: Double = 0.25, duration: Double = 0)
+        -> [(from: Double, to: Double)] {
+        let sorted = chunks.sorted { $0.from < $1.from }
+        var result: [(from: Double, to: Double)] = []
+        // Silencio inicial: antes de la primera palabra.
+        if let first = sorted.first, first.from > minimum {
+            result.append((0, max(0, first.from - margin)))
+        }
+        for (a, b) in zip(sorted, sorted.dropFirst()) where b.from - a.to > minimum {
+            // Se deja un margen a cada lado para no cortar la respiración
+            // ni comerse el arranque de la palabra siguiente.
+            let from = a.to + margin
+            let to = b.from - margin
+            if to > from { result.append((from, to)) }
+        }
+        // Silencio final: después de la última.
+        if duration > 0, let last = sorted.last, duration - last.to > minimum {
+            result.append((last.to + margin, duration))
+        }
+        return result.filter { $0.to - $0.from > 0.2 }
+    }
+
     // Lee el subtitulos.jsonl que el grabador deja en la carpeta.
     static func fromRecording(folder: URL) -> [SubtitleChunk] {
         let url = folder.appendingPathComponent("subtitulos.jsonl")

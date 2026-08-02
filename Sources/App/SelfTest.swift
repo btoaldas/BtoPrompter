@@ -372,6 +372,27 @@ enum SelfTest {
         expect(salvaje.sanitized().radius <= 0.2 && salvaje.sanitized().ringWidth >= 0,
                "el tamaño del halo se mantiene en lo razonable")
 
+        // Teclas en pantalla: el atajo se ve el tiempo que dura y luego se va.
+        var teclas = KeystrokeOverlay()
+        teclas.seconds = 1.5
+        teclas.events = [["1.00", "⌘S"], ["5.00", "⌥⇧F"]]
+        expect(teclas.label(at: 1.2) == "⌘S", "el atajo se ve mientras dura")
+        expect(teclas.label(at: 3.0) == nil, "pasado su tiempo desaparece")
+        expect(teclas.label(at: 0.5) == nil, "antes de pulsarlo no hay nada")
+        expect(teclas.label(at: 5.4) == "⌥⇧F", "el siguiente atajo llega a su hora")
+
+        // Silencios: los huecos largos entre frases, con margen.
+        let conHuecos = [SubtitleChunk(from: 2.0, to: 4.0, text: "hola"),
+                         SubtitleChunk(from: 9.0, to: 11.0, text: "adiós")]
+        let huecos = SubtitleBuilder.silences(in: conHuecos, duration: 15)
+        expect(huecos.count == 3, "silencio al principio, en medio y al final")
+        expect(huecos[1].from > 4.0 && huecos[1].to < 9.0,
+               "el hueco deja margen para no cortar la respiración")
+        let seguidas = [SubtitleChunk(from: 0, to: 2, text: "a"),
+                        SubtitleChunk(from: 2.2, to: 4, text: "b")]
+        expect(SubtitleBuilder.silences(in: seguidas, duration: 4).isEmpty,
+               "hablando seguido no hay silencios que quitar")
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",

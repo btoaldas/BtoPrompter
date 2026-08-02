@@ -364,6 +364,47 @@ struct CursorHighlight: Codable, Equatable {
     }
 }
 
+// Teclas en pantalla: se muestran un momento cuando se pulsan.
+struct KeystrokeOverlay: Codable, Equatable {
+    enum Corner: String, Codable, CaseIterable {
+        case bottomLeft, bottomCenter, bottomRight, topLeft, topRight
+    }
+    var enabled = false
+    var corner: Corner = .bottomLeft
+    var seconds: Double = 1.6        // cuánto se queda cada atajo en pantalla
+    var size: Double = 0.045         // fracción de la altura
+    var events: [[String]] = []      // [["1.20", "⌘S"], …]
+
+    // El atajo vigente en un instante: el último pulsado, mientras dure.
+    func label(at t: Double) -> String? {
+        var current: String?
+        for e in events where e.count == 2 {
+            guard let start = Double(e[0]) else { continue }
+            if start <= t && t < start + seconds { current = e[1] }
+            if start > t { break }
+        }
+        return current
+    }
+
+    func sanitized() -> KeystrokeOverlay {
+        var k = self
+        k.seconds = min(6, max(0.4, k.seconds))
+        k.size = min(0.15, max(0.02, k.size))
+        return k
+    }
+
+    static func fromRecording(folder: URL) -> [[String]] {
+        guard let text = try? String(contentsOf: folder.appendingPathComponent("teclas.jsonl"),
+                                     encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let d = line.data(using: .utf8),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let t = o["t"] as? Double, let k = o["k"] as? String else { return nil }
+            return [String(format: "%.2f", t), k]
+        }
+    }
+}
+
 // MARK: - Capas de audio
 
 // Un audio del usuario en el montaje: música de fondo bajita, un efecto…
@@ -405,6 +446,7 @@ struct VideoProject: Codable, Equatable {
     // Subtítulos quemados (nil = sin subtítulos configurados).
     var subtitles: SubtitleTrack? = nil
     var cursor: CursorHighlight? = nil
+    var keystrokes: KeystrokeOverlay? = nil
     var micVolume: Double = 1.0
     // Volumen del sonido del sistema (la pista de audio de pantalla-*.mov,
     // si la grabación lo capturó). Independiente del micrófono: se puede ver
@@ -429,6 +471,7 @@ struct VideoProject: Codable, Equatable {
         audioLayers = try c.decodeIfPresent([AudioLayer].self, forKey: .audioLayers) ?? []
         subtitles = try c.decodeIfPresent(SubtitleTrack.self, forKey: .subtitles)
         cursor = try c.decodeIfPresent(CursorHighlight.self, forKey: .cursor)
+        keystrokes = try c.decodeIfPresent(KeystrokeOverlay.self, forKey: .keystrokes)
         micVolume = try c.decodeIfPresent(Double.self, forKey: .micVolume) ?? 1.0
         screenAudioVolume = try c.decodeIfPresent(Double.self, forKey: .screenAudioVolume) ?? 1.0
         cameraOverridePath = try c.decodeIfPresent(String.self, forKey: .cameraOverridePath)
@@ -552,6 +595,7 @@ struct VideoProject: Codable, Equatable {
         p.audioLayers = p.audioLayers.map { $0.sanitized(projectDuration: p.duration) }
         p.subtitles = p.subtitles?.sanitized()
         p.cursor = p.cursor?.sanitized()
+        p.keystrokes = p.keystrokes?.sanitized()
         p.micVolume = min(1, max(0, p.micVolume))
         p.screenAudioVolume = min(1, max(0, p.screenAudioVolume))
         // Órdenes por tramo: fuera los ids de capas que ya no existen.

@@ -714,6 +714,7 @@ struct SegmentInspector: View {
                 PresetSection(state: state, onStructureChange: onStructureChange)
                 Divider()
                 CursorSection(state: state)
+                KeystrokeSection(state: state)
                 Divider()
                 SubtitleSection(state: state)
                 Divider()

@@ -249,6 +249,7 @@ final class RecordingEngine: NSObject, ObservableObject {
             }
             self.startedAt = Date()
             self.startCursorTracking()
+            KeystrokeRecorder.shared.start(at: Date())
             self.pausedRanges = []
             self.pauseStartedAt = nil
             self.elapsedText = "0:00"
@@ -381,6 +382,9 @@ final class RecordingEngine: NSObject, ObservableObject {
         screenOutput = nil
         writeChapters()
         writeCursorTrack()
+        if let folder = lastFolder {
+            KeystrokeRecorder.shared.write(toFolder: folder, anchor: firstFrameTimes["pantalla"])
+        }
         writePauses()
         writeSubtitleTrack()
         extractAudioCopies()

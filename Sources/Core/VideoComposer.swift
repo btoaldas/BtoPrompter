@@ -150,7 +150,8 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                                               layerImages: layerImages,
                                               subtitles: project.subtitles,
                                               subtitlePreview: !self.useExportSnapshot,
-                                              cursor: project.cursor)
+                                              cursor: project.cursor,
+                                              keystrokes: project.keystrokes)
 
             // Fundido de entrada: durante la ventana de la transición se
             // compone TAMBIÉN el tramo saliente y se mezclan. El corte sigue
@@ -195,7 +196,8 @@ enum FrameComposer {
                         layerImages: [UUID: CIImage] = [:],
                         subtitles: SubtitleTrack? = nil,
                         subtitlePreview: Bool = false,
-                        cursor: CursorHighlight? = nil) -> CIImage {
+                        cursor: CursorHighlight? = nil,
+                        keystrokes: KeystrokeOverlay? = nil) -> CIImage {
         let base = composeBase(screen: screen, camera: camera, layout: layout,
                                background: background, canvas: canvas,
                                seconds: seconds, extraLayers: extraLayers,
@@ -209,6 +211,11 @@ enum FrameComposer {
         // Halo del puntero: va sobre la pantalla y bajo los subtítulos.
         if let cur = cursor, cur.enabled, let pos = cur.position(at: seconds) {
             result = drawCursorHalo(cur, at: pos, over: result, canvas: canvas)
+        }
+        // Teclas pulsadas: sobre todo, para que se lean.
+        if let ks = keystrokes, ks.enabled, let label = ks.label(at: seconds),
+           let img = keystrokeImage(label, style: ks, canvas: canvas) {
+            result = img.composited(over: result)
         }
         // Subtítulos quemados SOLO si el proyecto lo pide (por defecto van
         // como .srt separado junto al MP4). En la previsualización se
@@ -300,6 +307,62 @@ enum FrameComposer {
         }
         guard let cg = ctx.makeImage() else { return base }
         return CIImage(cgImage: cg).composited(over: base)
+    }
+
+    // Cápsula oscura con el atajo, como las de los tutoriales.
+    private static let keyCache = NSCache<NSString, CIImage>()
+
+    static func keystrokeImage(_ label: String, style: KeystrokeOverlay,
+                               canvas: CGSize) -> CIImage? {
+        let key = "\(label)|\(style.size)|\(style.corner.rawValue)|\(Int(canvas.width))" as NSString
+        if let hit = keyCache.object(forKey: key) { return hit }
+
+        let w = Int(canvas.width), h = Int(canvas.height)
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return nil
+        }
+        let size = style.size * canvas.height
+        let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, size, nil)
+        let attributed = NSAttributedString(string: label, attributes: [
+            .font: font,
+            .foregroundColor: CGColor(red: 1, green: 1, blue: 1, alpha: 1),
+        ])
+        let line = CTLineCreateWithAttributedString(attributed)
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        let padX = size * 0.5, padY = size * 0.32
+        let boxW = bounds.width + padX * 2, boxH = bounds.height + padY * 2
+        let margin = size * 0.7
+
+        let x: CGFloat, y: CGFloat
+        switch style.corner {
+        case .bottomLeft:   x = margin; y = margin
+        case .bottomCenter: x = (canvas.width - boxW) / 2; y = margin
+        case .bottomRight:  x = canvas.width - boxW - margin; y = margin
+        case .topLeft:      x = margin; y = canvas.height - boxH - margin
+        case .topRight:     x = canvas.width - boxW - margin; y = canvas.height - boxH - margin
+        }
+        let box = CGRect(x: x, y: y, width: boxW, height: boxH)
+
+        ctx.setFillColor(CGColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 0.85))
+        ctx.addPath(CGPath(roundedRect: box, cornerWidth: boxH * 0.28,
+                           cornerHeight: boxH * 0.28, transform: nil))
+        ctx.fillPath()
+        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.2))
+        ctx.setLineWidth(max(1, size * 0.04))
+        ctx.addPath(CGPath(roundedRect: box, cornerWidth: boxH * 0.28,
+                           cornerHeight: boxH * 0.28, transform: nil))
+        ctx.strokePath()
+
+        ctx.textPosition = CGPoint(x: box.minX + padX, y: box.minY + padY - bounds.minY)
+        CTLineDraw(line, ctx)
+
+        guard let cg = ctx.makeImage() else { return nil }
+        let image = CIImage(cgImage: cg)
+        keyCache.setObject(image, forKey: key)
+        return image
     }
 
     // MARK: Anotaciones

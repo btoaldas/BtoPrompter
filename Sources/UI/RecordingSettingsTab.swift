@@ -14,6 +14,7 @@ struct RecordingSettingsTab: View {
     @State private var sysAudio = Settings.bool(.recordSystemAudio, default: false)
     @State private var audioCopies = Settings.bool(.recordAudioCopies, default: false)
     @State private var chapters = Settings.bool(.recordChapters, default: false)
+    @State private var keystrokes = Settings.bool(.recordKeystrokes, default: false)
     @State private var autoPlay = Settings.bool(.recordAutoPlayPrompter, default: true)
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
     @State private var cameraDevice = Settings.string(.recordCameraDevice, default: "")
@@ -79,6 +80,14 @@ struct RecordingSettingsTab: View {
                     .onChange(of: countdown) { v in Settings.set(v, .recordCountdown) }
                     Toggle("Arrancar el teleprompter al empezar a grabar", isOn: $autoPlay)
                         .onChange(of: autoPlay) { v in Settings.set(v, .recordAutoPlayPrompter) }
+                    Toggle("Registrar los atajos de teclado para mostrarlos en el vídeo",
+                           isOn: $keystrokes)
+                        .onChange(of: keystrokes) { v in Settings.set(v, .recordKeystrokes) }
+                    Text("Solo se apuntan ATAJOS (⌘S, ⌥⇧F…) y teclas que no escriben "
+                         + "(Esc, flechas, Intro). El texto que teclees NO se registra nunca: "
+                         + "podría ser una contraseña. Requiere permiso de Accesibilidad.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Toggle("Capítulos automáticos al cruzar cada guía", isOn: $chapters)
                         .onChange(of: chapters) { v in Settings.set(v, .recordChapters) }
                     Text("Queda un capitulos.txt junto a los vídeos con la hora de cada sección.")

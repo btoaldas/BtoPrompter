@@ -815,6 +815,7 @@ struct SubtitleSection: View {
                 ))
                 .font(.system(size: 11))
                 aiRow
+                silenceRow
                 stylePickers
             }
         }
@@ -966,6 +967,40 @@ struct SubtitleSection: View {
                 aiStatus = error.localizedDescription
             }
         }
+    }
+
+    @State private var silenceStatus: String? = nil
+
+    // Los huecos sin voz se convierten en cortes: quedan marcados en la línea
+    // de tiempo para revisarlos y quitarlos, en vez de buscarlos a mano.
+    private var silenceRow: some View {
+        HStack(spacing: 6) {
+            Button("Marcar los silencios") { markSilences() }
+                .font(.system(size: 10))
+                .disabled(track.chunks.isEmpty)
+                .help("Pone un corte donde nadie habló más de segundo y medio, "
+                      + "para que puedas revisarlos y quitarlos")
+            if let s = silenceStatus {
+                Text(s).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func markSilences() {
+        let huecos = SubtitleBuilder.silences(in: track.chunks,
+                                              duration: state.project.duration)
+        guard !huecos.isEmpty else {
+            silenceStatus = "No hay silencios largos"
+            return
+        }
+        var p = state.project
+        var puestos = 0
+        for h in huecos {
+            if p.addCut(at: h.from) != nil { puestos += 1 }
+            if p.addCut(at: h.to) != nil { puestos += 1 }
+        }
+        state.project = p
+        silenceStatus = "\(huecos.count) silencios · \(puestos) cortes"
     }
 
     private var hasPrompterTrack: Bool {
@@ -1127,6 +1162,70 @@ struct CursorSection: View {
             Slider(value: Binding(
                 get: { track[keyPath: kp] },
                 set: { v in var c = track; c[keyPath: kp] = v; state.project.cursor = c }
+            ), in: range)
+        }
+    }
+}
+
+// MARK: - Teclas en pantalla
+
+struct KeystrokeSection: View {
+    @ObservedObject var state: VideoProjectState
+
+    private var track: KeystrokeOverlay { state.project.keystrokes ?? KeystrokeOverlay() }
+
+    private var hasTrack: Bool {
+        FileManager.default.fileExists(
+            atPath: state.folder.appendingPathComponent("teclas.jsonl").path)
+    }
+
+    var body: some View {
+        if hasTrack {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Teclas en pantalla").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { state.project.keystrokes?.enabled ?? false },
+                        set: { on in
+                            var k = track
+                            k.enabled = on
+                            if on, k.events.isEmpty {
+                                k.events = KeystrokeOverlay.fromRecording(folder: state.folder)
+                            }
+                            state.project.keystrokes = k
+                        }
+                    ))
+                    .toggleStyle(.switch).controlSize(.mini)
+                }
+                if state.project.keystrokes?.enabled == true {
+                    Picker("Esquina", selection: Binding(
+                        get: { track.corner },
+                        set: { v in var k = track; k.corner = v; state.project.keystrokes = k }
+                    )) {
+                        Text("Abajo izq.").tag(KeystrokeOverlay.Corner.bottomLeft)
+                        Text("Abajo centro").tag(KeystrokeOverlay.Corner.bottomCenter)
+                        Text("Abajo der.").tag(KeystrokeOverlay.Corner.bottomRight)
+                        Text("Arriba izq.").tag(KeystrokeOverlay.Corner.topLeft)
+                        Text("Arriba der.").tag(KeystrokeOverlay.Corner.topRight)
+                    }
+                    .pickerStyle(.menu).font(.system(size: 11))
+                    keySlider("Duración", \.seconds, 0.4...6)
+                    keySlider("Tamaño", \.size, 0.02...0.12)
+                    Text("\(track.events.count) atajos registrados")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func keySlider(_ label: String, _ kp: WritableKeyPath<KeystrokeOverlay, Double>,
+                           _ range: ClosedRange<Double>) -> some View {
+        HStack {
+            Text(label).font(.system(size: 10)).frame(width: 60, alignment: .leading)
+            Slider(value: Binding(
+                get: { track[keyPath: kp] },
+                set: { v in var k = track; k[keyPath: kp] = v; state.project.keystrokes = k }
             ), in: range)
         }
     }
