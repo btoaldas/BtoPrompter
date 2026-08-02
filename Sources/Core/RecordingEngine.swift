@@ -30,6 +30,9 @@ final class RecordingEngine: NSObject, ObservableObject {
     // Marca de tiempo del inicio real, para los capítulos.
     private var startedAt: Date? = nil
     private var chapterMarks: [(seconds: Double, label: String)] = []
+    // Palabra↔segundo mientras se graba con el prompter en marcha: la base
+    // de los subtítulos automáticos del editor. Pocas KB, sin audio.
+    private var subtitleWords: [(seconds: Double, word: String)] = []
 
     // Cámara.
     private var cameraSession: AVCaptureSession?
@@ -133,6 +136,7 @@ final class RecordingEngine: NSObject, ObservableObject {
         }
         lastFolder = folder
         chapterMarks = []
+        subtitleWords = []
         firstFrameTimes = [:]
         status = nil
 
@@ -260,6 +264,7 @@ final class RecordingEngine: NSObject, ObservableObject {
         screenStream = nil
         screenOutput = nil
         writeChapters()
+        writeSubtitleTrack()
         extractAudioCopies()
         phase = .idle
         status = "Grabación guardada"
@@ -408,6 +413,31 @@ final class RecordingEngine: NSObject, ObservableObject {
     func markChapter(_ label: String) {
         guard phase == .recording, Self.wantChapters, let start = startedAt else { return }
         chapterMarks.append((Date().timeIntervalSince(start), label))
+    }
+
+    // El prompter avisa en cada palabra: base de los subtítulos automáticos.
+    // El tiempo va anclado al primer fotograma real de la cámara (o al
+    // arranque si no hay cámara) para cuadrar con el vídeo.
+    func noteWord(_ word: String) {
+        guard phase == .recording, !word.isEmpty else { return }
+        let anchor = firstFrameTimes["camara"] ?? startedAt
+        guard let anchor else { return }
+        subtitleWords.append((Date().timeIntervalSince(anchor), word))
+    }
+
+    private func writeSubtitleTrack() {
+        guard !subtitleWords.isEmpty, let folder = lastFolder else { return }
+        let lines = subtitleWords.compactMap { entry -> String? in
+            guard entry.seconds >= 0 else { return nil }
+            let payload: [String: Any] = ["w": entry.word,
+                                          "t": (entry.seconds * 100).rounded() / 100]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let line = String(data: data, encoding: .utf8) else { return nil }
+            return line
+        }
+        try? lines.joined(separator: "\n")
+            .write(to: folder.appendingPathComponent("subtitulos.jsonl"),
+                   atomically: true, encoding: .utf8)
     }
 
     private func writeChapters() {

@@ -262,6 +262,8 @@ struct VideoProject: Codable, Equatable {
     var extraLayers: [ExtraLayer] = []
     // Audios del usuario (música, efectos) y volumen del micrófono.
     var audioLayers: [AudioLayer] = []
+    // Subtítulos quemados (nil = sin subtítulos configurados).
+    var subtitles: SubtitleTrack? = nil
     var micVolume: Double = 1.0
     // Volumen del sonido del sistema (la pista de audio de pantalla-*.mov,
     // si la grabación lo capturó). Independiente del micrófono: se puede ver
@@ -284,6 +286,7 @@ struct VideoProject: Codable, Equatable {
         duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
         extraLayers = try c.decodeIfPresent([ExtraLayer].self, forKey: .extraLayers) ?? []
         audioLayers = try c.decodeIfPresent([AudioLayer].self, forKey: .audioLayers) ?? []
+        subtitles = try c.decodeIfPresent(SubtitleTrack.self, forKey: .subtitles)
         micVolume = try c.decodeIfPresent(Double.self, forKey: .micVolume) ?? 1.0
         screenAudioVolume = try c.decodeIfPresent(Double.self, forKey: .screenAudioVolume) ?? 1.0
         cameraOverridePath = try c.decodeIfPresent(String.self, forKey: .cameraOverridePath)
@@ -405,6 +408,7 @@ struct VideoProject: Codable, Equatable {
         p.layouts = p.layouts.map { $0.sanitized() }
         p.extraLayers = p.extraLayers.map { $0.sanitized(duration: p.duration) }
         p.audioLayers = p.audioLayers.map { $0.sanitized(projectDuration: p.duration) }
+        p.subtitles = p.subtitles?.sanitized()
         p.micVolume = min(1, max(0, p.micVolume))
         p.screenAudioVolume = min(1, max(0, p.screenAudioVolume))
         // Órdenes por tramo: fuera los ids de capas que ya no existen.

@@ -130,7 +130,8 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                                               layout: layout, background: project.background,
                                               canvas: size, seconds: seconds,
                                               extraLayers: ordered,
-                                              layerImages: layerImages)
+                                              layerImages: layerImages,
+                                              subtitles: project.subtitles)
 
             // Fundido de entrada: durante la ventana de la transición se
             // compone TAMBIÉN el tramo saliente y se mezclan. El corte sigue
@@ -172,7 +173,8 @@ enum FrameComposer {
                         layout: SegmentLayout, background: BackgroundStyle,
                         canvas: CGSize, seconds: Double = 0,
                         extraLayers: [ExtraLayer] = [],
-                        layerImages: [UUID: CIImage] = [:]) -> CIImage {
+                        layerImages: [UUID: CIImage] = [:],
+                        subtitles: SubtitleTrack? = nil) -> CIImage {
         let base = composeBase(screen: screen, camera: camera, layout: layout,
                                background: background, canvas: canvas,
                                seconds: seconds, extraLayers: extraLayers,
@@ -182,6 +184,12 @@ enum FrameComposer {
         for layer in extraLayers where !layer.behindCamera {
             result = drawLayer(layer, image: layerImages[layer.id],
                                at: seconds, over: result, canvas: canvas)
+        }
+        // Subtítulos quemados: siempre lo más arriba de todo.
+        if let track = subtitles, track.enabled,
+           let chunk = track.chunk(at: seconds),
+           let img = subtitleImage(chunk.text, style: track.style, canvas: canvas) {
+            result = img.composited(over: result)
         }
         return result
     }
@@ -429,6 +437,89 @@ enum FrameComposer {
         let dx = canvas.width / 2 - scaled.extent.midX
         let dy = canvas.height / 2 - scaled.extent.midY
         return scaled.transformed(by: .init(translationX: dx, y: dy))
+    }
+
+    // MARK: Subtítulos
+
+    // El texto se dibuja UNA vez por frase+estilo y se cachea: a 30 fps
+    // redibujar tipografía en cada fotograma sería un despilfarro.
+    private static let subtitleCache = NSCache<NSString, CIImage>()
+
+    static func subtitleImage(_ text: String, style: SubtitleStyle,
+                              canvas: CGSize) -> CIImage? {
+        let key = "\(text)|\(style.fontSize)|\(style.position.rawValue)|\(style.maxLines)|"
+            + "\(style.widthFraction)|\(style.boxOpacity)|\(style.shadow)|"
+            + "\(style.color.r),\(style.color.g),\(style.color.b)|"
+            + "\(style.shadowColor.r)|\(style.boxColor.r)|\(style.margin)|\(canvas.width)" as NSString
+        if let hit = subtitleCache.object(forKey: key) { return hit }
+
+        let w = Int(canvas.width), h = Int(canvas.height)
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return nil
+        }
+
+        let fontSize = style.fontSize * canvas.height
+        let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, fontSize, nil)
+        let textColor = CGColor(red: style.color.r, green: style.color.g,
+                                blue: style.color.b, alpha: 1)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+        ]
+        let attributed = NSAttributedString(string: text, attributes: attrs)
+
+        // Envoltura al ancho elegido; se limita al número de filas del estilo.
+        let maxWidth = canvas.width * style.widthFraction
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        let fit = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRange(location: 0, length: 0), nil,
+            CGSize(width: maxWidth, height: .greatestFiniteMagnitude), nil)
+        let lineHeight = fontSize * 1.25
+        let allowedHeight = lineHeight * Double(style.maxLines) + 4
+        let textSize = CGSize(width: min(fit.width, maxWidth),
+                              height: min(fit.height, allowedHeight))
+
+        // Posición del bloque en el lienzo (coordenadas CG: abajo-izquierda).
+        let x = (canvas.width - textSize.width) / 2
+        let y: CGFloat
+        switch style.position {
+        case .bottom: y = style.margin * canvas.height
+        case .middle: y = (canvas.height - textSize.height) / 2
+        case .top: y = canvas.height - textSize.height - style.margin * canvas.height
+        }
+        let textRect = CGRect(x: x, y: y, width: textSize.width, height: textSize.height)
+
+        // Caja de fondo.
+        if style.boxOpacity > 0 {
+            ctx.setFillColor(CGColor(red: style.boxColor.r, green: style.boxColor.g,
+                                     blue: style.boxColor.b, alpha: style.boxOpacity))
+            let pad = fontSize * 0.35
+            let box = textRect.insetBy(dx: -pad, dy: -pad * 0.6)
+            ctx.addPath(CGPath(roundedRect: box, cornerWidth: pad * 0.5,
+                               cornerHeight: pad * 0.5, transform: nil))
+            ctx.fillPath()
+        }
+
+        // Sombra del texto.
+        if style.shadow {
+            ctx.setShadow(offset: CGSize(width: 0, height: -fontSize * 0.06),
+                          blur: fontSize * 0.16,
+                          color: CGColor(red: style.shadowColor.r, green: style.shadowColor.g,
+                                         blue: style.shadowColor.b, alpha: 0.9))
+        }
+
+        let path = CGPath(rect: textRect, transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0),
+                                             path, nil)
+        CTFrameDraw(frame, ctx)
+
+        guard let cg = ctx.makeImage() else { return nil }
+        let image = CIImage(cgImage: cg)
+        subtitleCache.setObject(image, forKey: key)
+        return image
     }
 
     // MARK: Formas

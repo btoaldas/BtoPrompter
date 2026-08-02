@@ -54,6 +54,22 @@ Dos fuentes de subtítulos:
 - El grabador escribe `subtitulos.jsonl` en cada grabación (palabra + segundo
   relativo al inicio real de la grabación = firstFrameTimes["camara"]).
 
+### 2b. AMPLIACIÓN dictada (cuarta tanda): estilos completos + refinado con IA
+
+- **Estilos configurables TODOS**: posición (arriba/medio/abajo), una o dos
+  filas, ancho completo o 50–100 %, texto blanco con sombra negra, negro con
+  sombra blanca, con caja de fondo u sin ella, tamaño. Y **modelos con
+  nombre** (presets de estilo): Clásico TV, Formal, Juvenil, Invertido,
+  Minimal… El usuario elige un modelo y ajusta encima.
+- **NO karaoke** (el propio Alberto lo descartó: confuso). Solo frases.
+- **Refinado con IA**: botón que manda las palabras+tiempos (y el guion) al
+  proveedor de IA ya configurado en la app (Groq/OpenAI/…, misma
+  infraestructura del Ensayo IA) para que devuelva frases bien puntuadas,
+  con mayúsculas correctas y cortes naturales, respetando los tiempos
+  medidos. El análisis del AUDIO ya lo cubren los proveedores STT de la app
+  si hiciera falta re-transcribir; la v1 refina sobre palabra↔segundo que ya
+  es real.
+
 ## 3. Capas de AUDIO — ✅ base HECHA (commit 3a3c856) + AMPLIACIÓN dictada
 
 HECHO: `audioLayers` (volumen, recorte del archivo con sourceStart, posición
@@ -96,6 +112,37 @@ IMAGEN + SONIDO. Son 4 canales lógicos y el usuario combina los que quiera:
   en paralelo (para narrar viendo la imagen) — versión 1: solo grabar.
 - Permiso de micrófono: el que la app ya tiene; la acción es explícita.
 - La exportación hereda el audioMix (AVAssetExportSession.audioMix). HECHO.
+
+### 2c. QUINTA TANDA dictada (2026-08-01, noche) — SOLO PLANIFICADO, NO ejecutar aún
+
+**Subtítulos separados del vídeo (por defecto NO quemados):**
+- La decisión es POR PROYECTO y EN LA INTERFAZ (no una configuración global):
+  al exportar, el usuario elige — (a) quemar los subtítulos en el vídeo,
+  (b) exportarlos como archivo .SRT SEPARADO junto al MP4 (para subirlo a
+  YouTube como pista de subtítulos), o ambos. POR DEFECTO: separado, sin
+  quemar.
+- El editor ya sabe generar el SRT (chunks → formato SRT es trivial, el
+  parser inverso ya existe).
+
+**Traducciones con IA (los 10 idiomas más hablados):**
+- Botón "Traducir subtítulos…": con la IA configurada en la app (misma
+  infraestructura del Ensayo IA) se genera un SRT POR IDIOMA: español,
+  inglés, chino mandarín, hindi, francés, árabe, bengalí, portugués, ruso,
+  japonés (lista de 10, ajustable). Exporta video.mp4 + video.es.srt +
+  video.en.srt + … listos para YouTube.
+- Los tiempos NO se tocan (ya son reales); la IA solo traduce el texto de
+  cada chunk manteniendo el número de bloques.
+
+**Doblaje del audio con IA (idea grande, EN COLA, no empezar sin OK):**
+- Cambiar la voz del orador a otro idioma con ElevenLabs (la app ya tiene la
+  infraestructura TTS de ElevenLabs para la lectura y wa-voice): voz
+  masculina o femenina a elegir, lo más humano posible.
+- v1: UNA sola voz para todo el vídeo (multi-orador después).
+- Pipeline: subtítulos con tiempos → traducción → TTS por frase → pista de
+  audio nueva alineada a los tiempos (estirando/encogiendo si la frase
+  doblada no cabe) → entra como AudioLayer sustituyendo al micrófono.
+- Los 10 idiomas como opción (pesado: un TTS por frase por idioma — avisar
+  del costo antes de lanzar).
 
 ## 4. Presets estilo OBS (plantillas en 4 niveles — afinado en la segunda tanda)
 
@@ -155,9 +202,16 @@ tramos (pedido explícito: nada de que el corte deje de ser corte).
 4. ✅ Capas de audio base (commit 3a3c856)
 5. Sonido del sistema en la grabación de pantalla + screenAudioVolume (3b).
 6. Voz en off grabable, N capas (3c).
-7. Subtítulos (grabador escribe subtitulos.jsonl + capa quemada + SRT).
-8. Presets OBS en 4 niveles (características → componente → escena →
-   plantilla con placeholders demo).
+7. ✅ Subtítulos: subtitulos.jsonl del grabador + agrupador de frases +
+   parser SRT + dibujo Core Text cacheado + 5 modelos de estilo + UI completa
+   (posición/filas/ancho/tamaño/color/sombra/caja). Verificado con fotogramas
+   del MP4 exportado. PENDIENTE de la 4ª/5ª tanda: refinado con IA, SRT
+   separado sin quemar (por defecto), traducciones 10 idiomas, doblaje
+   ElevenLabs (ver 2b y 2c).
+8. ✅ Presets OBS en 4 niveles: VideoPresetStore (video-presets.json) con
+   características/componente/escena/plantilla, placeholders "demo N"
+   verificados en selftest (jamás rutas reales), diálogo de mapeo al aplicar.
+   Menús Guardar…/Aplicar… en el inspector.
 
 ## Reglas que siguen vigentes
 

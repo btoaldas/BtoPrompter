@@ -643,3 +643,358 @@ struct AudioSection: View {
         onStructureChange()
     }
 }
+
+// MARK: - Subtítulos
+
+// Activables, con dos orígenes (el propio teleprompter o un SRT) y estilo
+// completo: modelos con nombre, posición, filas, ancho, tamaño y caja.
+struct SubtitleSection: View {
+    @ObservedObject var state: VideoProjectState
+
+    private var track: SubtitleTrack {
+        state.project.subtitles ?? SubtitleTrack(enabled: false)
+    }
+
+    private func setTrack(_ t: SubtitleTrack?) {
+        state.project.subtitles = t
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Subtítulos").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { state.project.subtitles?.enabled ?? false },
+                    set: { on in
+                        var t = track
+                        t.enabled = on
+                        setTrack(t)
+                    }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            }
+
+            HStack(spacing: 6) {
+                if hasPrompterTrack {
+                    Button("Del teleprompter") {
+                        var t = track
+                        t.chunks = SubtitleBuilder.fromRecording(folder: state.folder)
+                        t.enabled = !t.chunks.isEmpty
+                        setTrack(t)
+                    }
+                    .font(.system(size: 10))
+                    .help("Genera las frases desde lo que el teleprompter marcó al grabar")
+                }
+                Button("Archivo SRT…") { importSRT() }
+                    .font(.system(size: 10))
+                if !track.chunks.isEmpty {
+                    Text("\(track.chunks.count) frases")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+
+            if state.project.subtitles?.enabled == true {
+                stylePickers
+            }
+        }
+    }
+
+    private var hasPrompterTrack: Bool {
+        FileManager.default.fileExists(
+            atPath: state.folder.appendingPathComponent("subtitulos.jsonl").path)
+    }
+
+    private var stylePickers: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            // Modelos con nombre: se aplican y se ajusta encima.
+            HStack(spacing: 4) {
+                ForEach(Array(SubtitleStyle.models.enumerated()), id: \.offset) { _, model in
+                    Button(model.name) {
+                        var t = track
+                        t.style = model.style
+                        setTrack(t)
+                    }
+                    .font(.system(size: 9))
+                    .buttonStyle(.bordered)
+                }
+            }
+            Picker("Posición", selection: bindStyle(\.position)) {
+                Text("Arriba").tag(SubtitleStyle.Position.top)
+                Text("Al medio").tag(SubtitleStyle.Position.middle)
+                Text("Abajo").tag(SubtitleStyle.Position.bottom)
+            }
+            .pickerStyle(.segmented)
+            Picker("Filas", selection: bindStyle(\.maxLines)) {
+                Text("Una fila").tag(1)
+                Text("Dos filas").tag(2)
+            }
+            .pickerStyle(.segmented)
+            styleSlider("Ancho", \.widthFraction, 0.5...1)
+            styleSlider("Tamaño", \.fontSize, 0.02...0.12)
+            styleSlider("Caja de fondo", \.boxOpacity, 0...1)
+            Toggle("Sombra del texto", isOn: bindStyle(\.shadow))
+                .font(.system(size: 11))
+            ColorPicker("Color del texto", selection: Binding(
+                get: {
+                    let c = track.style.color
+                    return Color(red: c.r, green: c.g, blue: c.b)
+                },
+                set: { new in
+                    let ns = NSColor(new).usingColorSpace(.deviceRGB) ?? .white
+                    var t = track
+                    t.style.color = RGBA(r: ns.redComponent, g: ns.greenComponent, b: ns.blueComponent)
+                    setTrack(t)
+                }
+            ))
+            .font(.system(size: 11))
+        }
+    }
+
+    private func bindStyle<T>(_ kp: WritableKeyPath<SubtitleStyle, T>) -> Binding<T> {
+        Binding(
+            get: { track.style[keyPath: kp] },
+            set: { v in
+                var t = track
+                t.style[keyPath: kp] = v
+                setTrack(t)
+            }
+        )
+    }
+
+    private func styleSlider(_ label: String, _ kp: WritableKeyPath<SubtitleStyle, Double>,
+                             _ range: ClosedRange<Double>) -> some View {
+        HStack {
+            Text(label).font(.system(size: 10)).frame(width: 88, alignment: .leading)
+            Slider(value: bindStyle(kp), in: range)
+        }
+    }
+
+    private func importSRT() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText, .data]
+        panel.prompt = "Importar SRT"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let content = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let chunks = SubtitleBuilder.parseSRT(content)
+        guard !chunks.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "No se encontraron subtítulos en el archivo"
+            alert.informativeText = "El archivo no tiene bloques SRT válidos "
+                + "(número, tiempos con -->, texto)."
+            alert.runModal()
+            return
+        }
+        var t = track
+        t.chunks = chunks
+        t.enabled = true
+        setTrack(t)
+    }
+}
+
+// MARK: - Presets estilo OBS
+
+// Guardar y aplicar presets en cuatro niveles: características de la capa
+// seleccionada, componente (capa completa), escena (el tramo con sus capas)
+// y plantilla del proyecto entero. Las plantillas llevan las capas como
+// "demo N": al aplicarlas se pide qué archivo va en cada hueco.
+struct PresetSection: View {
+    @ObservedObject var state: VideoProjectState
+    let onStructureChange: () -> Void
+
+    @State private var library = VideoPresetStore.load()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Presets (estilo OBS)").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Menu("Guardar…") {
+                    if let idx = selectedLayerIndex {
+                        Button("Características de «\(state.project.extraLayers[idx].name)»") {
+                            saveStyle(from: state.project.extraLayers[idx])
+                        }
+                        Button("Componente «\(state.project.extraLayers[idx].name)»") {
+                            saveComponent(from: state.project.extraLayers[idx])
+                        }
+                    }
+                    Button("Escena (tramo actual)") { saveScene() }
+                    Button("Proyecto completo como plantilla") { saveTemplate() }
+                }
+                .font(.system(size: 10))
+
+                Menu("Aplicar…") {
+                    if !library.styles.isEmpty, selectedLayerIndex != nil {
+                        Section("Características") {
+                            ForEach(Array(library.styles.enumerated()), id: \.offset) { _, s in
+                                Button(s.name) { applyStyle(s) }
+                            }
+                        }
+                    }
+                    if !library.components.isEmpty {
+                        Section("Componentes") {
+                            ForEach(Array(library.components.enumerated()), id: \.offset) { _, c in
+                                Button(c.name) { applyComponent(c) }
+                            }
+                        }
+                    }
+                    if !library.scenes.isEmpty {
+                        Section("Escenas (al tramo actual)") {
+                            ForEach(Array(library.scenes.enumerated()), id: \.offset) { _, s in
+                                Button(s.name) { applyScene(s) }
+                            }
+                        }
+                    }
+                    if !library.templates.isEmpty {
+                        Section("Plantillas de proyecto") {
+                            ForEach(Array(library.templates.enumerated()), id: \.offset) { _, t in
+                                Button(t.name) { applyTemplate(t) }
+                            }
+                        }
+                    }
+                    if library.styles.isEmpty && library.components.isEmpty
+                        && library.scenes.isEmpty && library.templates.isEmpty {
+                        Text("Aún no hay presets guardados")
+                    }
+                }
+                .font(.system(size: 10))
+            }
+        }
+        .onAppear { library = VideoPresetStore.load() }
+    }
+
+    private var selectedLayerIndex: Int? {
+        guard let id = state.selectedLayerID else { return nil }
+        return state.project.extraLayers.firstIndex { $0.id == id }
+    }
+
+    // MARK: Guardar
+
+    private func askName(_ title: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Guardar")
+        alert.addButton(withTitle: "Cancelar")
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
+    }
+
+    private func saveStyle(from layer: ExtraLayer) {
+        guard let name = askName("Nombre del preset de características") else { return }
+        library.styles.append(StylePreset(name: name, shape: layer.shape,
+                                          borderWidth: layer.borderWidth,
+                                          opacity: layer.opacity,
+                                          fit: layer.settings.fit))
+        VideoPresetStore.save(library)
+    }
+
+    private func saveComponent(from layer: ExtraLayer) {
+        guard let name = askName("Nombre del preset de componente") else { return }
+        let placeholder = VideoPresetStore.placeholdered([layer])[0]
+        library.components.append(ComponentPreset(name: name, layer: placeholder))
+        VideoPresetStore.save(library)
+    }
+
+    private func saveScene() {
+        guard let name = askName("Nombre del preset de escena") else { return }
+        let seg = min(state.selectedSegment, state.project.layouts.count - 1)
+        library.scenes.append(ScenePreset(
+            name: name,
+            layout: state.project.layouts[max(0, seg)],
+            layers: VideoPresetStore.placeholdered(state.project.extraLayers)))
+        VideoPresetStore.save(library)
+    }
+
+    private func saveTemplate() {
+        guard let name = askName("Nombre de la plantilla de proyecto") else { return }
+        library.templates.append(ProjectTemplate(
+            name: name,
+            cuts: state.project.cuts,
+            layouts: state.project.layouts,
+            layers: VideoPresetStore.placeholdered(state.project.extraLayers),
+            background: state.project.background,
+            subtitleStyle: state.project.subtitles?.style))
+        VideoPresetStore.save(library)
+    }
+
+    // MARK: Aplicar
+
+    private func applyStyle(_ s: StylePreset) {
+        guard let idx = selectedLayerIndex else { return }
+        var p = state.project
+        p.extraLayers[idx].shape = s.shape
+        p.extraLayers[idx].borderWidth = s.borderWidth
+        p.extraLayers[idx].opacity = s.opacity
+        p.extraLayers[idx].settings.fit = s.fit
+        state.project = p
+    }
+
+    // Por cada hueco "demo N" se pide el archivo real; cancelar = se omite.
+    private func resolvePlaceholders(_ layers: [ExtraLayer]) -> [ExtraLayer] {
+        var result: [ExtraLayer] = []
+        for layer in layers {
+            guard VideoPresetStore.isPlaceholder(layer) else {
+                result.append(layer)
+                continue
+            }
+            let panel = NSOpenPanel()
+            panel.message = "Elige el archivo para «\(layer.name)» (Cancelar la omite)"
+            panel.allowedContentTypes = layer.kind == .video
+                ? [.movie, .mpeg4Movie, .quickTimeMovie]
+                : [.png, .jpeg, .heic, .tiff, .gif]
+            guard panel.runModal() == .OK, let url = panel.url else { continue }
+            var l = layer
+            l.id = UUID()
+            l.path = url.path
+            l.name = url.deletingPathExtension().lastPathComponent
+            FrameComposer.forgetMissing(url.path)
+            result.append(l)
+        }
+        return result
+    }
+
+    private func applyComponent(_ c: ComponentPreset) {
+        let resolved = resolvePlaceholders([c.layer])
+        guard !resolved.isEmpty else { return }
+        var p = state.project
+        p.extraLayers.append(contentsOf: resolved)
+        state.project = p
+        if resolved.contains(where: { $0.kind == .video }) { onStructureChange() }
+    }
+
+    private func applyScene(_ s: ScenePreset) {
+        var p = state.project
+        let seg = min(state.selectedSegment, p.layouts.count - 1)
+        guard seg >= 0 else { return }
+        var layout = s.layout
+        layout.layerOrder = nil   // el orden guardado apunta a ids de otro proyecto
+        p.layouts[seg] = layout.sanitized()
+        let resolved = resolvePlaceholders(s.layers)
+        p.extraLayers.append(contentsOf: resolved)
+        state.project = p
+        if resolved.contains(where: { $0.kind == .video }) { onStructureChange() }
+    }
+
+    private func applyTemplate(_ t: ProjectTemplate) {
+        var p = state.project
+        p.cuts = t.cuts
+        p.layouts = t.layouts.map { l in
+            var l2 = l
+            l2.layerOrder = nil
+            return l2
+        }
+        p.background = t.background
+        p.extraLayers = resolvePlaceholders(t.layers)
+        if let style = t.subtitleStyle {
+            var track = p.subtitles ?? SubtitleTrack(enabled: false)
+            track.style = style
+            p.subtitles = track
+        }
+        state.project = p.sanitized()
+        state.selectedSegment = 0
+        onStructureChange()
+    }
+}

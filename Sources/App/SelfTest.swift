@@ -219,6 +219,59 @@ enum SelfTest {
         expect(zps.layouts[1].layerOrder?.contains(cA.id) != true,
                "el saneo limpia ids muertos del orden del tramo")
 
+        // Subtítulos: palabras con tiempo → frases; y el parser SRT.
+        typealias TW = SubtitleBuilder.TimedWord
+        let habla = [TW(w: "Hola", t: 0.0), TW(w: "a", t: 0.4), TW(w: "todos.", t: 0.8),
+                     TW(w: "Hoy", t: 3.5), TW(w: "presentamos", t: 4.0), TW(w: "esto", t: 4.4)]
+        let frases = SubtitleBuilder.group(habla)
+        expect(frases.count == 2, "el punto cierra la primera frase")
+        expect(frases[0].text == "Hola a todos." && frases[0].from == 0.0,
+               "la frase junta sus palabras con su tiempo")
+        expect(frases[0].to <= frases[1].from, "las frases no se solapan")
+        expect(frases[1].from == 3.5, "la pausa larga abre frase nueva")
+        let muchos = (0..<20).map { TW(w: "p\($0)", t: Double($0) * 0.3) }
+        expect(SubtitleBuilder.group(muchos).allSatisfy {
+            $0.text.split(separator: " ").count <= 8
+        }, "ninguna frase pasa de ocho palabras")
+
+        let srt = """
+        1
+        00:00:01,500 --> 00:00:04,000
+        Primera frase
+        del subtítulo
+
+        2
+        00:00:05,000 --> 00:00:07,250
+        Segunda frase
+        """
+        let parsed = SubtitleBuilder.parseSRT(srt)
+        expect(parsed.count == 2, "dos bloques SRT")
+        expect(parsed[0].from == 1.5 && parsed[0].to == 4.0
+               && parsed[0].text == "Primera frase del subtítulo",
+               "tiempos y texto multilínea del SRT")
+        expect(parsed[1].to == 7.25, "milisegundos con coma bien leídos")
+        expect(SubtitleBuilder.parseSRT("basura sin bloques").isEmpty,
+               "SRT inválido devuelve vacío sin reventar")
+
+        // Presets: los placeholders no arrastran rutas de otros proyectos.
+        let realLayers = [ExtraLayer(kind: .video, path: "/Users/x/privado.mov", name: "mío"),
+                          ExtraLayer(kind: .image, path: "/tmp/logo.png", name: "logo")]
+        let demos = VideoPresetStore.placeholdered(realLayers)
+        expect(demos.allSatisfy { VideoPresetStore.isPlaceholder($0) },
+               "las plantillas guardan demo N, jamás rutas reales")
+        expect(!demos.contains { $0.path.contains("privado") },
+               "ninguna ruta original sobrevive en el preset")
+        var lib = VideoPresetLibrary()
+        lib.templates.append(ProjectTemplate(name: "t", cuts: [2], layouts: [SegmentLayout()],
+                                             layers: demos, background: .default,
+                                             subtitleStyle: SubtitleStyle()))
+        if let data = try? JSONEncoder().encode(lib),
+           let back = try? JSONDecoder().decode(VideoPresetLibrary.self, from: data) {
+            expect(back == lib, "la biblioteca de presets sobrevive al viaje por JSON")
+        } else {
+            expect(false, "la biblioteca de presets sobrevive al viaje por JSON")
+        }
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",

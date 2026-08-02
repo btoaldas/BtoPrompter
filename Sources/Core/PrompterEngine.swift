@@ -32,6 +32,11 @@ final class PrompterModel: ObservableObject {
                                              chunkID: chunk.id,
                                              source: voiceActive ? "voz" : "tiempo",
                                              wpm: wpm)
+                // Si se está grabando, la palabra queda con su segundo: la
+                // base de los subtítulos automáticos del editor.
+                DispatchQueue.main.async {
+                    RecordingEngine.shared.noteWord(word)
+                }
             }
             // Cruce de marcas de diapositiva: solo hacia adelante.
             guard currentIndex > oldValue else { return }
