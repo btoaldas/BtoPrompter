@@ -173,9 +173,12 @@ final class RecordingEngine: NSObject, ObservableObject {
     private func runCountdown(_ n: Int) {
         phase = .countdown(n)
         guard n > 0 else {
+            CountdownWindowController.shared.hide()
             beginRecording()
             return
         }
+        // El 3, 2, 1 a pantalla completa: con teleprompter o sin él.
+        CountdownWindowController.shared.show(n)
         let work = DispatchWorkItem { [weak self] in self?.runCountdown(n - 1) }
         countdownWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
@@ -184,6 +187,7 @@ final class RecordingEngine: NSObject, ObservableObject {
     private func cancelCountdown() {
         countdownWork?.cancel()
         countdownWork = nil
+        CountdownWindowController.shared.hide()
         phase = .idle
         status = "Grabación cancelada"
     }

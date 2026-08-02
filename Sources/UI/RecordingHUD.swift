@@ -89,6 +89,7 @@ final class RecordingHUDController: NSObject, NSWindowDelegate {
 
 struct RecordingHUDView: View {
     @ObservedObject private var engine = RecordingEngine.shared
+    @State private var countdown = Settings.int(.recordCountdown, default: 3)
 
     var body: some View {
         HStack(spacing: 8) {
@@ -113,6 +114,28 @@ struct RecordingHUDView: View {
 
             switch engine.phase {
             case .idle:
+                // Los segundos de preparación, aquí mismo: cambiarlos no
+                // debería obligar a abrir Ajustes justo antes de grabar.
+                Menu {
+                    ForEach([0, 3, 5, 10, 15], id: \.self) { s in
+                        Button(s == 0 ? "Sin espera" : "\(s) segundos") {
+                            Settings.set(s, .recordCountdown)
+                            countdown = s
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "timer").font(.system(size: 11))
+                        Text(countdown == 0 ? "0" : "\(countdown)")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundColor(.white.opacity(0.8))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Segundos de preparación antes de grabar")
+
                 button("record.circle.fill", .red, "Grabar (⌘R)") { engine.start() }
             case .countdown(let n):
                 Text("\(n)")

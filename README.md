@@ -68,7 +68,7 @@ BtoPrompter es un teleprompter que flota **encima de todas tus ventanas** mientr
 
 ## Tecnología
 
-- **Swift** (AppKit + SwiftUI), cero dependencias externas, arquitectura por capas (ver [ARCHITECTURE.md](ARCHITECTURE.md)).
+- **Swift** (AppKit + SwiftUI), cero dependencias externas, arquitectura por capas.
 - Tokenización de oraciones con **NaturalLanguage** (`NLTokenizer`).
 - Se compila con `swiftc` directo — no requiere proyecto de Xcode.
 - Requiere macOS 13 o superior (Apple Silicon o Intel). El nuevo Apple Speech local en vivo requiere macOS 26; en versiones anteriores se puede elegir otro proveedor compatible.
@@ -129,6 +129,7 @@ El vídeo se divide en **tramos de tiempo** y cada tramo tiene su propia receta:
 - **Audio desacoplado por fuente**: el escritorio y la webcam traen cada uno imagen Y sonido, y los combinas libres — la vista del escritorio con solo el audio de la webcam, o al revés (volúmenes independientes de micrófono y sistema). Además **audios tuyos** (música de fondo, efectos) con volumen, recorte del archivo (usar del minuto 1 al 3 de un MP3) y posición exacta, y **voz en off grabable desde el editor**: pulsa el botón, narra, y la toma entra como capa de audio donde estaba el cursor — N tomas, todas ajustables.
 - 🎛️ **Mando flotante de grabación** — un panel pequeño que flota sobre todo, **se arrastra a donde quieras** y recuerda su sitio: grabar, pausar y parar con un clic, con el cronómetro a la vista. **No aparece en las grabaciones ni en las capturas**, igual que el teleprompter: es un control de quien graba, no contenido. Atajos ⌘R (grabar/parar) y ⌘⇧R (pausar/reanudar).
 - 🔇 **Cancelación del eco del sistema** (opcional): si mientras hablas suena algo en el Mac, el micrófono lo capta por los altavoces y queda duplicado. Con esta opción el micrófono se graba aparte y limpio con la tecnología de voz de macOS — la misma que usan Zoom y Teams. **Medido: 38 dB menos** de audio del sistema en el micrófono (−26,5 dB → −64,6 dB).
+- ⏱️ **Cuenta regresiva a pantalla completa**: el 3, 2, 1 grande antes de grabar, con teleprompter o sin él, y los segundos se eligen **en el propio mando** (0, 3, 5, 10 o 15) sin abrir Ajustes. No aparece en la grabación.
 - **Sonido del sistema y copias solo-audio** (Ajustes → Grabación, apagados por defecto): graba también lo que suena en el Mac (va en el archivo de pantalla) y extrae copias sueltas `audio-webcam.m4a` / `audio-sistema.m4a` para usarlas donde quieras sin abrir el editor.
 - **Cortes arrastrables**: los marcadores de la línea de tiempo se agarran y se mueven, con imán a segundos enteros.
 - **Subtítulos** (activables por proyecto): generados **del propio teleprompter** — la app sabe qué palabra dijiste en qué segundo y arma las frases sola — o importados de un archivo SRT. Cinco modelos de estilo (Clásico TV, Formal, Juvenil, Invertido, Minimal) y todo configurable: posición arriba/medio/abajo, una o dos filas, ancho, tamaño, color, sombra y caja de fondo. **Por defecto NO se queman**: al exportar salen como `video.srt` separado junto al MP4, listo para subirlo a YouTube como pista (quemarlos es la opción, en la propia interfaz).
