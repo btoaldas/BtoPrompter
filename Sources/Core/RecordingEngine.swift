@@ -40,6 +40,11 @@ final class RecordingEngine: NSObject, ObservableObject {
     // Palabra↔segundo mientras se graba con el prompter en marcha: la base
     // de los subtítulos automáticos del editor. Pocas KB, sin audio.
     private var subtitleWords: [(seconds: Double, word: String)] = []
+    // Recorrido del puntero durante la grabación, para poder resaltarlo
+    // después en el montaje. Son unos pocos KB: t, x, y varias veces por
+    // segundo, normalizados a la pantalla.
+    private var cursorTrack: [(t: Double, x: Double, y: Double)] = []
+    private var cursorTimer: Timer?
 
     // Cámara.
     private var cameraSession: AVCaptureSession?
@@ -243,6 +248,7 @@ final class RecordingEngine: NSObject, ObservableObject {
                 return
             }
             self.startedAt = Date()
+            self.startCursorTracking()
             self.pausedRanges = []
             self.pauseStartedAt = nil
             self.elapsedText = "0:00"
@@ -374,6 +380,7 @@ final class RecordingEngine: NSObject, ObservableObject {
         screenStream = nil
         screenOutput = nil
         writeChapters()
+        writeCursorTrack()
         writePauses()
         writeSubtitleTrack()
         extractAudioCopies()
@@ -567,6 +574,51 @@ final class RecordingEngine: NSObject, ObservableObject {
         let anchor = firstFrameTimes["camara"] ?? startedAt
         guard let anchor else { return }
         subtitleWords.append((Date().timeIntervalSince(anchor), word))
+    }
+
+    // El puntero se muestrea 20 veces por segundo: suficiente para que el
+    // halo siga al ratón sin dar saltos, y ridículo en tamaño.
+    private func startCursorTracking() {
+        cursorTrack = []
+        cursorTimer?.invalidate()
+        guard Self.wantScreen else { return }
+        cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.startedAt, self.phase == .recording,
+                      let screen = NSScreen.main else { return }
+                let p = NSEvent.mouseLocation
+                let f = screen.frame
+                guard f.width > 0, f.height > 0 else { return }
+                // Normalizado y con el origen ARRIBA, como el vídeo.
+                self.cursorTrack.append((
+                    t: Date().timeIntervalSince(start),
+                    x: (p.x - f.minX) / f.width,
+                    y: 1 - (p.y - f.minY) / f.height))
+            }
+        }
+    }
+
+    private func writeCursorTrack() {
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        guard !cursorTrack.isEmpty, let folder = lastFolder else { return }
+        // Se ancla al primer fotograma real de la pantalla, que es sobre la
+        // que se va a dibujar el halo.
+        let anchor = firstFrameTimes["pantalla"] ?? startedAt
+        let shift = anchor.map { $0.timeIntervalSince(startedAt ?? $0) } ?? 0
+        let lines = cursorTrack.compactMap { e -> String? in
+            let t = e.t - shift
+            guard t >= 0 else { return nil }
+            let payload: [String: Any] = ["t": (t * 100).rounded() / 100,
+                                          "x": (e.x * 1000).rounded() / 1000,
+                                          "y": (e.y * 1000).rounded() / 1000]
+            guard let d = try? JSONSerialization.data(withJSONObject: payload),
+                  let s = String(data: d, encoding: .utf8) else { return nil }
+            return s
+        }
+        try? lines.joined(separator: "\n")
+            .write(to: folder.appendingPathComponent("cursor.jsonl"),
+                   atomically: true, encoding: .utf8)
     }
 
     private func writeSubtitleTrack() {

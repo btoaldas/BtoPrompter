@@ -1060,6 +1060,78 @@ struct SubtitleSection: View {
     }
 }
 
+// MARK: - Cursor resaltado
+
+// Halo que sigue al puntero en la grabación de pantalla. El recorrido lo
+// grabó el grabador; aquí solo se enciende y se le da forma.
+struct CursorSection: View {
+    @ObservedObject var state: VideoProjectState
+
+    private var track: CursorHighlight {
+        state.project.cursor ?? CursorHighlight()
+    }
+
+    private var hasTrack: Bool {
+        FileManager.default.fileExists(
+            atPath: state.folder.appendingPathComponent("cursor.jsonl").path)
+    }
+
+    var body: some View {
+        if hasTrack {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Cursor resaltado").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { state.project.cursor?.enabled ?? false },
+                        set: { on in
+                            var c = track
+                            c.enabled = on
+                            // El recorrido se carga la primera vez que se enciende.
+                            if on, c.points.isEmpty {
+                                c.points = CursorHighlight.fromRecording(folder: state.folder)
+                            }
+                            state.project.cursor = c
+                        }
+                    ))
+                    .toggleStyle(.switch).controlSize(.mini)
+                }
+                if state.project.cursor?.enabled == true {
+                    slider("Tamaño", \.radius, 0.005...0.15)
+                    slider("Anillo", \.ringWidth, 0...0.02)
+                    ColorPicker("Color", selection: Binding(
+                        get: {
+                            let c = track.color
+                            return Color(red: c.r, green: c.g, blue: c.b).opacity(c.a)
+                        },
+                        set: { new in
+                            let ns = NSColor(new).usingColorSpace(.deviceRGB) ?? .yellow
+                            var c = track
+                            c.color = RGBA(r: ns.redComponent, g: ns.greenComponent,
+                                           b: ns.blueComponent, a: ns.alphaComponent)
+                            state.project.cursor = c
+                        }
+                    ))
+                    .font(.caption)
+                    Text("\(track.points.count) posiciones registradas al grabar")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func slider(_ label: String, _ kp: WritableKeyPath<CursorHighlight, Double>,
+                        _ range: ClosedRange<Double>) -> some View {
+        HStack {
+            Text(label).font(.system(size: 10)).frame(width: 60, alignment: .leading)
+            Slider(value: Binding(
+                get: { track[keyPath: kp] },
+                set: { v in var c = track; c[keyPath: kp] = v; state.project.cursor = c }
+            ), in: range)
+        }
+    }
+}
+
 // MARK: - Presets estilo OBS
 
 // Guardar y aplicar presets en cuatro niveles: características de la capa

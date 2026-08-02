@@ -713,6 +713,8 @@ struct SegmentInspector: View {
                 Divider()
                 PresetSection(state: state, onStructureChange: onStructureChange)
                 Divider()
+                CursorSection(state: state)
+                Divider()
                 SubtitleSection(state: state)
                 Divider()
                 AudioSection(state: state, playhead: $playhead,

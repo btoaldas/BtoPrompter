@@ -149,7 +149,8 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                                               extraLayers: ordered,
                                               layerImages: layerImages,
                                               subtitles: project.subtitles,
-                                              subtitlePreview: !self.useExportSnapshot)
+                                              subtitlePreview: !self.useExportSnapshot,
+                                              cursor: project.cursor)
 
             // Fundido de entrada: durante la ventana de la transición se
             // compone TAMBIÉN el tramo saliente y se mezclan. El corte sigue
@@ -193,7 +194,8 @@ enum FrameComposer {
                         extraLayers: [ExtraLayer] = [],
                         layerImages: [UUID: CIImage] = [:],
                         subtitles: SubtitleTrack? = nil,
-                        subtitlePreview: Bool = false) -> CIImage {
+                        subtitlePreview: Bool = false,
+                        cursor: CursorHighlight? = nil) -> CIImage {
         let base = composeBase(screen: screen, camera: camera, layout: layout,
                                background: background, canvas: canvas,
                                seconds: seconds, extraLayers: extraLayers,
@@ -203,6 +205,10 @@ enum FrameComposer {
         for layer in extraLayers where !layer.behindCamera {
             result = drawLayer(layer, image: layerImages[layer.id],
                                at: seconds, over: result, canvas: canvas)
+        }
+        // Halo del puntero: va sobre la pantalla y bajo los subtítulos.
+        if let cur = cursor, cur.enabled, let pos = cur.position(at: seconds) {
+            result = drawCursorHalo(cur, at: pos, over: result, canvas: canvas)
         }
         // Subtítulos quemados SOLO si el proyecto lo pide (por defecto van
         // como .srt separado junto al MP4). En la previsualización se
@@ -247,6 +253,53 @@ enum FrameComposer {
     // Imagen de una capa (cacheada igual que el fondo).
     static func layerImage(_ path: String) -> CIImage? {
         cachedImage(path)
+    }
+
+    // Halo del puntero. Se dibuja en coordenadas del LIENZO: cuando la
+    // pantalla ocupa todo (que es el caso normal) cae justo donde estaba el
+    // ratón. Con la pantalla en una ventana pequeña o recortada, el halo
+    // sigue el mismo encuadre general, que para señalar basta.
+    static func drawCursorHalo(_ cur: CursorHighlight, at pos: (x: Double, y: Double),
+                               over base: CIImage, canvas: CGSize) -> CIImage {
+        let r = cur.radius * min(canvas.width, canvas.height)
+        let cx = pos.x * canvas.width
+        let cy = (1 - pos.y) * canvas.height      // el modelo va con origen arriba
+        let box = CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)
+        guard box.width > 2, r.isFinite, cx.isFinite, cy.isFinite else { return base }
+
+        let w = Int(canvas.width), h = Int(canvas.height)
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return base
+        }
+        // Relleno suave con un degradado radial: un círculo plano tapa el
+        // contenido; así se ve por debajo.
+        let space = CGColorSpaceCreateDeviceRGB()
+        let inner = CGColor(red: cur.color.r, green: cur.color.g, blue: cur.color.b,
+                            alpha: cur.color.a)
+        let outer = CGColor(red: cur.color.r, green: cur.color.g, blue: cur.color.b, alpha: 0)
+        if let gradient = CGGradient(colorsSpace: space,
+                                     colors: [inner, outer] as CFArray,
+                                     locations: [0, 1]) {
+            ctx.saveGState()
+            ctx.addEllipse(in: box)
+            ctx.clip()
+            ctx.drawRadialGradient(gradient, startCenter: CGPoint(x: cx, y: cy), startRadius: 0,
+                                   endCenter: CGPoint(x: cx, y: cy), endRadius: r,
+                                   options: [])
+            ctx.restoreGState()
+        }
+        if cur.ringWidth > 0 {
+            let lw = cur.ringWidth * min(canvas.width, canvas.height)
+            ctx.setStrokeColor(CGColor(red: cur.color.r, green: cur.color.g,
+                                       blue: cur.color.b, alpha: min(1, cur.color.a + 0.4)))
+            ctx.setLineWidth(lw)
+            ctx.strokeEllipse(in: box.insetBy(dx: lw / 2, dy: lw / 2))
+        }
+        guard let cg = ctx.makeImage() else { return base }
+        return CIImage(cgImage: cg).composited(over: base)
     }
 
     // MARK: Anotaciones

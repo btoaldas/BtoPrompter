@@ -310,6 +310,60 @@ struct ExtraLayer: Codable, Equatable, Identifiable {
     }
 }
 
+// Resaltar el puntero en la grabación de pantalla: un halo suave que lo
+// sigue, que es lo que separa un tutorial que se entiende de uno donde nadie
+// encuentra el ratón. El recorrido lo graba el propio grabador.
+struct CursorHighlight: Codable, Equatable {
+    var enabled = false
+    var color = RGBA(r: 1, g: 0.85, b: 0.1, a: 0.45)
+    // Radio como fracción del lado menor del lienzo.
+    var radius: Double = 0.035
+    // Anillo alrededor del halo (0 = solo el relleno).
+    var ringWidth: Double = 0.004
+    var points: [[Double]] = []      // [t, x, y] normalizados, del grabador
+
+    func position(at seconds: Double) -> (x: Double, y: Double)? {
+        guard points.count > 1 else {
+            if let p = points.first, p.count == 3 { return (p[1], p[2]) }
+            return nil
+        }
+        // Interpolación entre las dos muestras que rodean al instante: el
+        // halo se desliza en vez de dar saltos de veinte en veinte por segundo.
+        var previous = points[0]
+        for p in points where p.count == 3 {
+            if p[0] >= seconds {
+                let t0 = previous[0], t1 = p[0]
+                guard t1 > t0 else { return (p[1], p[2]) }
+                let f = min(1, max(0, (seconds - t0) / (t1 - t0)))
+                return (previous[1] + (p[1] - previous[1]) * f,
+                        previous[2] + (p[2] - previous[2]) * f)
+            }
+            previous = p
+        }
+        return (previous[1], previous[2])
+    }
+
+    func sanitized() -> CursorHighlight {
+        var c = self
+        c.radius = min(0.2, max(0.005, c.radius))
+        c.ringWidth = min(0.05, max(0, c.ringWidth))
+        return c
+    }
+
+    // Lee el cursor.jsonl que deja el grabador.
+    static func fromRecording(folder: URL) -> [[Double]] {
+        guard let text = try? String(contentsOf: folder.appendingPathComponent("cursor.jsonl"),
+                                     encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let d = line.data(using: .utf8),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let t = o["t"] as? Double, let x = o["x"] as? Double,
+                  let y = o["y"] as? Double else { return nil }
+            return [t, x, y]
+        }
+    }
+}
+
 // MARK: - Capas de audio
 
 // Un audio del usuario en el montaje: música de fondo bajita, un efecto…
@@ -350,6 +404,7 @@ struct VideoProject: Codable, Equatable {
     var audioLayers: [AudioLayer] = []
     // Subtítulos quemados (nil = sin subtítulos configurados).
     var subtitles: SubtitleTrack? = nil
+    var cursor: CursorHighlight? = nil
     var micVolume: Double = 1.0
     // Volumen del sonido del sistema (la pista de audio de pantalla-*.mov,
     // si la grabación lo capturó). Independiente del micrófono: se puede ver
@@ -373,6 +428,7 @@ struct VideoProject: Codable, Equatable {
         extraLayers = try c.decodeIfPresent([ExtraLayer].self, forKey: .extraLayers) ?? []
         audioLayers = try c.decodeIfPresent([AudioLayer].self, forKey: .audioLayers) ?? []
         subtitles = try c.decodeIfPresent(SubtitleTrack.self, forKey: .subtitles)
+        cursor = try c.decodeIfPresent(CursorHighlight.self, forKey: .cursor)
         micVolume = try c.decodeIfPresent(Double.self, forKey: .micVolume) ?? 1.0
         screenAudioVolume = try c.decodeIfPresent(Double.self, forKey: .screenAudioVolume) ?? 1.0
         cameraOverridePath = try c.decodeIfPresent(String.self, forKey: .cameraOverridePath)
@@ -495,6 +551,7 @@ struct VideoProject: Codable, Equatable {
         p.extraLayers = p.extraLayers.map { $0.sanitized(duration: p.duration) }
         p.audioLayers = p.audioLayers.map { $0.sanitized(projectDuration: p.duration) }
         p.subtitles = p.subtitles?.sanitized()
+        p.cursor = p.cursor?.sanitized()
         p.micVolume = min(1, max(0, p.micVolume))
         p.screenAudioVolume = min(1, max(0, p.screenAudioVolume))
         // Órdenes por tramo: fuera los ids de capas que ya no existen.

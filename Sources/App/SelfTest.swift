@@ -347,6 +347,23 @@ enum SelfTest {
         expect(abs(nivel(sinReferencia) - nivel(solaVoz)) < 0.02,
                "sin sonido del sistema la voz sale intacta")
 
+        // Cursor resaltado: la posición se interpola entre muestras.
+        var cur = CursorHighlight()
+        cur.points = [[0, 0.0, 0.0], [1, 1.0, 0.5], [2, 0.5, 1.0]]
+        expect(cur.position(at: 0)?.x == 0, "en el primer instante manda la primera muestra")
+        if let mid = cur.position(at: 0.5) {
+            expect(abs(mid.x - 0.5) < 0.01 && abs(mid.y - 0.25) < 0.01,
+                   "entre dos muestras el halo va a medio camino")
+        } else {
+            expect(false, "entre dos muestras el halo va a medio camino")
+        }
+        expect(cur.position(at: 99)?.y == 1.0, "pasado el final se queda en la última")
+        expect(CursorHighlight().position(at: 1) == nil, "sin recorrido no hay halo")
+        var salvaje = CursorHighlight()
+        salvaje.radius = 9; salvaje.ringWidth = -1
+        expect(salvaje.sanitized().radius <= 0.2 && salvaje.sanitized().ringWidth >= 0,
+               "el tamaño del halo se mantiene en lo razonable")
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",
