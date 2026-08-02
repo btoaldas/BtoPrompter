@@ -343,7 +343,8 @@ struct VideoEditorView: View {
             let saved = VideoProjectStore.load(folder: folder, duration: 0)
             let built = try await CompositionBuilder.build(sources, extraLayers: saved.extraLayers,
                                                            audioLayers: saved.audioLayers,
-                                                           micVolume: saved.micVolume)
+                                                           micVolume: saved.micVolume,
+                                                           screenAudioVolume: saved.screenAudioVolume)
             guard gen == buildGeneration else { return }
             composition = built.composition
             videoComposition = built.video
@@ -387,7 +388,8 @@ struct VideoEditorView: View {
             let src = freshSources ?? sources
             let built = try await CompositionBuilder.build(src, extraLayers: state.project.extraLayers,
                                                            audioLayers: state.project.audioLayers,
-                                                           micVolume: state.project.micVolume)
+                                                           micVolume: state.project.micVolume,
+                                                           screenAudioVolume: state.project.screenAudioVolume)
             // Otro rebuild arrancó mientras este esperaba: el viejo se calla
             // en vez de terminar último y pisar al nuevo.
             guard gen == buildGeneration else { return }
@@ -454,7 +456,8 @@ struct VideoEditorView: View {
                 let built = try await CompositionBuilder.build(src,
                                                                extraLayers: snapshot.extraLayers,
                                                                audioLayers: snapshot.audioLayers,
-                                                               micVolume: snapshot.micVolume)
+                                                               micVolume: snapshot.micVolume,
+                                                               screenAudioVolume: snapshot.screenAudioVolume)
                 built.video.customVideoCompositorClass = ExportCompositor.self
                 exportSession = CompositionExporter.export(
                     composition: built.composition, video: built.video,

@@ -76,6 +76,12 @@ IMAGEN + SONIDO. Son 4 canales lógicos y el usuario combina los que quiera:
   Grabación: **"Sonido del sistema en la grabación de pantalla"** (OFF por
   defecto) → `SCStreamConfiguration.capturesAudio = true` → pantalla-*.mov
   con pista de audio. El builder añade esa pista con su volumen propio.
+- AÑADIDO (tercera tanda dictada): **copias solo-audio opcionales** — el vídeo
+  se guarda SIEMPRE con su audio embebido (mute = cosa de mezcla, no se pierde
+  nada), y además, con la opción activada, al terminar la grabación se
+  EXTRAEN copias aparte: `audio-webcam-<stamp>.m4a` (micrófono) y
+  `audio-sistema-<stamp>.m4a` (sonido del Mac, si se capturó). Así el usuario
+  tiene el audio suelto para usarlo donde quiera sin abrir el editor.
 
 ### 3c. VOZ EN OFF (dictado): N capas grabables desde el editor
 

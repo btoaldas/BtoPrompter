@@ -65,6 +65,8 @@ final class RecordingEngine: NSObject, ObservableObject {
     static var wantScreen: Bool { Settings.bool(.recordScreen, default: false) }
     static var wantMic: Bool { Settings.bool(.recordMicInRecording, default: true) }
     static var wantChapters: Bool { Settings.bool(.recordChapters, default: false) }
+    static var wantSystemAudio: Bool { Settings.bool(.recordSystemAudio, default: false) }
+    static var wantAudioCopies: Bool { Settings.bool(.recordAudioCopies, default: false) }
     static var countdownSeconds: Int { Settings.int(.recordCountdown, default: 3) }
 
     // Carpeta accesible sin abrir la app: Películas/BtoPrompter.
@@ -258,6 +260,7 @@ final class RecordingEngine: NSObject, ObservableObject {
         screenStream = nil
         screenOutput = nil
         writeChapters()
+        extractAudioCopies()
         phase = .idle
         status = "Grabación guardada"
         if let f = lastFolder {
@@ -363,7 +366,13 @@ final class RecordingEngine: NSObject, ObservableObject {
                 config.width = display.width * 2
                 config.height = display.height * 2
                 config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-                config.capturesAudio = false   // el audio va en el archivo de cámara
+                // El sonido del SISTEMA (lo que suena en el Mac) es opcional:
+                // con él, el editor puede mezclar la vista del escritorio con
+                // el audio que se quiera. El micrófono sigue yendo con la cámara.
+                config.capturesAudio = Self.wantSystemAudio
+                if Self.wantSystemAudio {
+                    config.excludesCurrentProcessAudio = true   // sin ecos de la propia app
+                }
                 config.showsCursor = true
 
                 let stream = SCStream(filter: filter, configuration: config, delegate: nil)
@@ -410,6 +419,38 @@ final class RecordingEngine: NSObject, ObservableObject {
         }
         let url = folder.appendingPathComponent("capitulos.txt")
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Copias solo-audio
+
+    // El audio SIEMPRE viaja embebido en los .mov (silenciarlo es cosa de la
+    // mezcla, nada se pierde). Con la opción activada, además se extraen
+    // copias sueltas: el micrófono de la webcam y el sonido del sistema de la
+    // pantalla, listos para usar donde sea sin abrir el editor.
+    private func extractAudioCopies() {
+        guard Self.wantAudioCopies, let folder = lastFolder else { return }
+        let stamp = folder.lastPathComponent
+        let jobs: [(source: String, output: String)] = [
+            ("camara-\(stamp).mov", "audio-webcam-\(stamp).m4a"),
+            ("pantalla-\(stamp).mov", "audio-sistema-\(stamp).m4a"),
+        ]
+        for job in jobs {
+            let src = folder.appendingPathComponent(job.source)
+            let dst = folder.appendingPathComponent(job.output)
+            guard FileManager.default.fileExists(atPath: src.path) else { continue }
+            Task.detached(priority: .utility) {
+                let asset = AVURLAsset(url: src)
+                guard let tracks = try? await asset.loadTracks(withMediaType: .audio),
+                      !tracks.isEmpty,
+                      let session = AVAssetExportSession(asset: asset,
+                                                         presetName: AVAssetExportPresetAppleM4A) else {
+                    return
+                }
+                session.outputURL = dst
+                session.outputFileType = .m4a
+                session.exportAsynchronously { }
+            }
+        }
     }
 
     // MARK: - Utilidades

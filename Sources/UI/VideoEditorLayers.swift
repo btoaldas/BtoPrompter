@@ -464,15 +464,22 @@ struct LayersSection: View {
 // del micrófono (audio de la cámara) también vive aquí.
 struct AudioSection: View {
     @ObservedObject var state: VideoProjectState
+    @StateObject private var voiceover = VoiceoverRecorder()
     @Binding var playhead: Double
     let onStructureChange: () -> Void
+    // Dónde estaba el cursor al empezar la toma: ahí se inserta la voz.
+    @State private var voiceoverStart: Double = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Audio").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                voiceoverButton
                 Button("＋ Audio") { addAudio() }.font(.system(size: 10))
+            }
+            if let s = voiceover.status {
+                Text(s).font(.caption2).foregroundStyle(.orange)
             }
             HStack {
                 Image(systemName: "mic").font(.system(size: 10))
@@ -485,6 +492,20 @@ struct AudioSection: View {
                     .font(.system(size: 9, design: .monospaced))
                     .frame(width: 32)
             }
+            HStack {
+                Image(systemName: "speaker.wave.2").font(.system(size: 10))
+                Text("Sistema").font(.caption)
+                Slider(value: Binding(
+                    get: { state.project.screenAudioVolume },
+                    set: { v in state.project.screenAudioVolume = v; scheduleRebuild() }
+                ), in: 0...1)
+                Text("\(Int(state.project.screenAudioVolume * 100))%")
+                    .font(.system(size: 9, design: .monospaced))
+                    .frame(width: 32)
+            }
+            .help("El sonido del Mac grabado con la pantalla (actívalo en Ajustes → "
+                  + "Grabación). Independiente del micrófono: puedes ver el escritorio "
+                  + "con solo el audio de la webcam, o al revés.")
             ForEach(Array(state.project.audioLayers.enumerated()), id: \.element.id) { i, audio in
                 audioRow(i, audio)
             }
@@ -562,6 +583,43 @@ struct AudioSection: View {
         .frame(width: 42)
         .font(.system(size: 9, design: .monospaced))
         .textFieldStyle(.roundedBorder)
+    }
+
+    // Narrar sobre el vídeo: graba del micrófono y al parar la toma entra
+    // como capa de audio posicionada donde estaba el cursor al empezar.
+    private var voiceoverButton: some View {
+        Button(action: { toggleVoiceover() }) {
+            if voiceover.isRecording {
+                HStack(spacing: 3) {
+                    Circle().fill(Color.red).frame(width: 7, height: 7)
+                    Text(String(format: "%.0f s — parar", voiceover.elapsed))
+                }
+            } else {
+                Label("Voz en off", systemImage: "mic.badge.plus")
+            }
+        }
+        .font(.system(size: 10))
+        .tint(voiceover.isRecording ? .red : nil)
+        .help(voiceover.isRecording
+              ? "Parar la toma: entrará como capa de audio donde estaba el cursor"
+              : "Grabar una voz en off desde el micrófono, insertada donde está el cursor")
+    }
+
+    private func toggleVoiceover() {
+        if voiceover.isRecording {
+            guard let url = voiceover.stop() else { return }
+            var layer = AudioLayer(path: url.path,
+                                   name: url.deletingPathExtension().lastPathComponent)
+            layer.volume = 1.0
+            layer.projectStart = voiceoverStart
+            var p = state.project
+            p.audioLayers.append(layer)
+            state.project = p
+            onStructureChange()
+        } else {
+            voiceoverStart = playhead
+            _ = voiceover.start(inFolder: state.folder)
+        }
     }
 
     private func addAudio() {

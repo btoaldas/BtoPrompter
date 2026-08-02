@@ -263,6 +263,10 @@ struct VideoProject: Codable, Equatable {
     // Audios del usuario (música, efectos) y volumen del micrófono.
     var audioLayers: [AudioLayer] = []
     var micVolume: Double = 1.0
+    // Volumen del sonido del sistema (la pista de audio de pantalla-*.mov,
+    // si la grabación lo capturó). Independiente del micrófono: se puede ver
+    // el escritorio con el sonido de la webcam, o al revés.
+    var screenAudioVolume: Double = 1.0
     // Fuentes propias: sustituyen a la cámara o pantalla grabadas (o las
     // aportan si la grabación no las tiene). Rutas absolutas elegidas por él.
     var cameraOverridePath: String? = nil
@@ -281,6 +285,7 @@ struct VideoProject: Codable, Equatable {
         extraLayers = try c.decodeIfPresent([ExtraLayer].self, forKey: .extraLayers) ?? []
         audioLayers = try c.decodeIfPresent([AudioLayer].self, forKey: .audioLayers) ?? []
         micVolume = try c.decodeIfPresent(Double.self, forKey: .micVolume) ?? 1.0
+        screenAudioVolume = try c.decodeIfPresent(Double.self, forKey: .screenAudioVolume) ?? 1.0
         cameraOverridePath = try c.decodeIfPresent(String.self, forKey: .cameraOverridePath)
         screenOverridePath = try c.decodeIfPresent(String.self, forKey: .screenOverridePath)
     }
@@ -401,6 +406,7 @@ struct VideoProject: Codable, Equatable {
         p.extraLayers = p.extraLayers.map { $0.sanitized(duration: p.duration) }
         p.audioLayers = p.audioLayers.map { $0.sanitized(projectDuration: p.duration) }
         p.micVolume = min(1, max(0, p.micVolume))
+        p.screenAudioVolume = min(1, max(0, p.screenAudioVolume))
         // Órdenes por tramo: fuera los ids de capas que ya no existen.
         let alive = Set(p.extraLayers.map(\.id))
         for i in p.layouts.indices {

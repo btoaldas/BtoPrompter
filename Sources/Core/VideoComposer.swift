@@ -533,7 +533,8 @@ enum CompositionBuilder {
     // las instrucciones deben teselar [0, duración] sin huecos ni solapes, o
     // la exportación revienta con -11841 (aquí: una sola instrucción total).
     static func build(_ src: Sources, extraLayers: [ExtraLayer] = [],
-                      audioLayers: [AudioLayer] = [], micVolume: Double = 1.0) async throws
+                      audioLayers: [AudioLayer] = [], micVolume: Double = 1.0,
+                      screenAudioVolume: Double = 1.0) async throws
         -> (composition: AVMutableComposition, video: AVMutableVideoComposition,
             duration: Double, audioMix: AVAudioMix?) {
         let screenAsset = src.screenURL.map { AVURLAsset(url: $0) }
@@ -590,6 +591,20 @@ enum CompositionBuilder {
                 of: audio, at: .zero)
             let params = AVMutableAudioMixInputParameters(track: aTrack)
             params.setVolume(Float(micVolume), at: .zero)
+            mixParams.append(params)
+        }
+
+        // El sonido del SISTEMA vive en el archivo de pantalla (si la
+        // grabación lo capturó). Su volumen es independiente del micrófono:
+        // así se ve el escritorio con el audio de la webcam, o al revés.
+        if let sysAudio = try await screenAsset?.loadTracks(withMediaType: .audio).first {
+            let aTrack = comp.addMutableTrack(withMediaType: .audio,
+                                              preferredTrackID: kCMPersistentTrackID_Invalid)!
+            try aTrack.insertTimeRange(
+                CMTimeRange(start: CMTime(seconds: scrDelay, preferredTimescale: 600), duration: duration),
+                of: sysAudio, at: .zero)
+            let params = AVMutableAudioMixInputParameters(track: aTrack)
+            params.setVolume(Float(screenAudioVolume), at: .zero)
             mixParams.append(params)
         }
 

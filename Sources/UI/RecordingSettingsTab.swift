@@ -11,6 +11,8 @@ struct RecordingSettingsTab: View {
     @State private var camera = Settings.bool(.recordCamera, default: true)
     @State private var screen = Settings.bool(.recordScreen, default: false)
     @State private var mic = Settings.bool(.recordMicInRecording, default: true)
+    @State private var sysAudio = Settings.bool(.recordSystemAudio, default: false)
+    @State private var audioCopies = Settings.bool(.recordAudioCopies, default: false)
     @State private var chapters = Settings.bool(.recordChapters, default: false)
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
     @State private var cameraDevice = Settings.string(.recordCameraDevice, default: "")
@@ -46,6 +48,18 @@ struct RecordingSettingsTab: View {
                         .onChange(of: screen) { v in Settings.set(v, .recordScreen) }
                     Toggle("Micrófono (va en el archivo de cámara)", isOn: $mic)
                         .onChange(of: mic) { v in Settings.set(v, .recordMicInRecording) }
+                    Toggle("Sonido del sistema (va en el archivo de pantalla)", isOn: $sysAudio)
+                        .onChange(of: sysAudio) { v in Settings.set(v, .recordSystemAudio) }
+                    Text("Con el sonido del sistema grabado, el editor puede mezclar la vista "
+                         + "del escritorio con el audio que quieras: micrófono, sistema o ambos.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Guardar además copias solo-audio (.m4a)", isOn: $audioCopies)
+                        .onChange(of: audioCopies) { v in Settings.set(v, .recordAudioCopies) }
+                    Text("El audio siempre va dentro de los vídeos; esto extrae ADEMÁS "
+                         + "audio-webcam y audio-sistema como archivos sueltos, para no perder nada.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Comportamiento") {

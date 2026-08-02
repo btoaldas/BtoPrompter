@@ -25,6 +25,7 @@ enum Settings {
         case aiEnabled, aiProvider, aiModel, aiBaseURL, aiStyle, aiCustomPrompt
         case recordingEnabled, recordCamera, recordScreen, recordFolder
         case recordCameraDevice, recordCountdown, recordChapters, recordMicInRecording
+        case recordSystemAudio, recordAudioCopies
         case videoEditorEnabled
         // Claves históricas de la v1.0 (migradas a la biblioteca).
         case legacyScript = "script"

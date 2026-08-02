@@ -61,7 +61,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
             }
             let built = try await CompositionBuilder.build(sources, extraLayers: project.extraLayers,
                                                            audioLayers: project.audioLayers,
-                                                           micVolume: project.micVolume)
+                                                           micVolume: project.micVolume,
+                                                           screenAudioVolume: project.screenAudioVolume)
             project.duration = built.duration
             CompositionParameters.shared.project = project.sanitized()
             CompositionExporter.export(composition: built.composition, video: built.video,
