@@ -281,7 +281,7 @@ enum FrameComposer {
             return (processed ?? region).composited(over: base)
         }
 
-        let key = "\(content.kind.rawValue)|\(content.text)|\(content.thickness)|"
+        let key = "\(content.kind.rawValue)|\(content.text)|\(content.thickness)|\(content.points.count)|"
             + "\(content.color.r),\(content.color.g),\(content.color.b)|"
             + "\(Int(rect.width))x\(Int(rect.height))|\(Int(rect.minX)),\(Int(rect.minY))|"
             + "\(Int(canvas.width))" as NSString
@@ -348,6 +348,43 @@ enum FrameComposer {
             let path = CGPath(rect: rect, transform: nil)
             let frame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), path, nil)
             CTFrameDraw(frame, ctx)
+        case .note:
+            // Nota adhesiva: rectángulo del color elegido con el texto encima
+            // y una esquina doblada, como un papelito pegado.
+            ctx.setFillColor(color)
+            ctx.fill(rect)
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.18))
+            let fold = min(rect.width, rect.height) * 0.18
+            ctx.move(to: CGPoint(x: rect.maxX - fold, y: rect.maxY))
+            ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - fold))
+            ctx.fillPath()
+            if !content.text.isEmpty {
+                let size = max(11, rect.height * 0.16)
+                let font = CTFontCreateWithName("HelveticaNeue-Medium" as CFString, size, nil)
+                // Texto oscuro sobre la nota: se lee sobre amarillos y claros.
+                let attributed = NSAttributedString(string: content.text, attributes: [
+                    .font: font,
+                    .foregroundColor: CGColor(red: 0.1, green: 0.09, blue: 0.05, alpha: 1),
+                ])
+                let setter = CTFramesetterCreateWithAttributedString(attributed)
+                let inner = rect.insetBy(dx: size * 0.6, dy: size * 0.5)
+                let frame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0),
+                                                     CGPath(rect: inner, transform: nil), nil)
+                CTFrameDraw(frame, ctx)
+            }
+        case .freehand:
+            // Trazo a mano: los puntos van normalizados dentro del recuadro,
+            // así el dibujo se mueve y crece con la capa.
+            guard content.points.count > 1 else { break }
+            ctx.setLineWidth(line)
+            var first = true
+            for pt in content.points where pt.count == 2 {
+                let p = CGPoint(x: rect.minX + pt[0] * rect.width,
+                                y: rect.minY + (1 - pt[1]) * rect.height)
+                if first { ctx.move(to: p); first = false } else { ctx.addLine(to: p) }
+            }
+            ctx.strokePath()
         case .blur:
             break   // ya tratado arriba
         }

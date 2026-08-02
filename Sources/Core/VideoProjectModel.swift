@@ -206,6 +206,8 @@ struct ShapeContent: Codable, Equatable {
         case text           // texto suelto
         case strikethrough  // tachado
         case blur           // pixelado/borroso: tapa datos sensibles
+        case note           // nota adhesiva con texto
+        case freehand       // trazo a mano alzada
 
         var label: String {
             switch self {
@@ -216,6 +218,8 @@ struct ShapeContent: Codable, Equatable {
             case .text: return "Texto"
             case .strikethrough: return "Tachado"
             case .blur: return "Pixelar"
+            case .note: return "Nota"
+            case .freehand: return "Lápiz"
             }
         }
 
@@ -228,6 +232,8 @@ struct ShapeContent: Codable, Equatable {
             case .text: return "textformat"
             case .strikethrough: return "strikethrough"
             case .blur: return "eye.slash"
+            case .note: return "note.text"
+            case .freehand: return "scribble"
             }
         }
     }
@@ -235,7 +241,10 @@ struct ShapeContent: Codable, Equatable {
     var kind: Kind = .arrow
     var color = RGBA(r: 1, g: 0.23, b: 0.19)     // rojo señalador
     var thickness: Double = 0.006                 // fracción del lado menor
-    var text: String = ""                         // solo para .text
+    var text: String = ""                         // para .text y .note
+    // Puntos del trazo a mano alzada, normalizados 0..1 dentro del recuadro
+    // de la capa: así el trazo se mueve y escala con ella como todo lo demás.
+    var points: [[Double]] = []
     // Pixelar en bloques (true) o desenfocar (false).
     var pixelate = true
 

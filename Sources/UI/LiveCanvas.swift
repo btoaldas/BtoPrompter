@@ -27,6 +27,7 @@ struct LiveCanvasOverlay: View {
     // Esquina donde empezó el trazo de una anotación nueva.
     @State private var drawStart: CGPoint? = nil
     @State private var drawNow: CGPoint? = nil
+    @State private var strokePoints: [CGPoint] = []
 
     var body: some View {
         GeometryReader { geo in
@@ -42,12 +43,16 @@ struct LiveCanvasOverlay: View {
                                 .onChanged { g in
                                     if drawStart == nil { drawStart = g.startLocation }
                                     drawNow = g.location
+                                    // El lápiz guarda TODO el recorrido, no
+                                    // solo las esquinas: es un trazo, no una caja.
+                                    if tool == .freehand { strokePoints.append(g.location) }
                                 }
                                 .onEnded { g in
                                     finishDrawing(start: g.startLocation, end: g.location,
                                                   canvas: canvas)
                                     drawStart = nil
                                     drawNow = nil
+                                    strokePoints = []
                                 }
                         )
                     if let s = drawStart, let n = drawNow {
@@ -100,6 +105,20 @@ struct LiveCanvasOverlay: View {
         var content = ShapeContent()
         content.kind = kind
         if kind == .text { content.text = "Texto" }
+        if kind == .note {
+            content.text = "Nota"
+            content.color = RGBA(r: 1, g: 0.87, b: 0.35)   // papelito amarillo
+        }
+        if kind == .freehand {
+            // El trazo se guarda dentro del recuadro que lo envuelve, en
+            // 0..1, para que luego se mueva y escale con la capa.
+            let box = CGRect(x: minX, y: minY, width: w, height: h)
+            content.points = strokePoints.map { pt in
+                [Double((pt.x - box.minX) / max(1, box.width)),
+                 Double(1 - (pt.y - box.minY) / max(1, box.height))]
+            }
+            guard content.points.count > 1 else { return }
+        }
         var layer = ExtraLayer(kind: .shape, path: "", name: kind.label)
         layer.shapeContent = content
         layer.rect = nrect
