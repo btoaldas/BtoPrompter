@@ -482,17 +482,30 @@ struct AudioSection: View {
                 Text(s).font(.caption2).foregroundStyle(.orange)
             }
             if hasSystemAudio {
-                HStack(spacing: 6) {
-                    Button(cleaning ? "Limpiando…" : "Quitar el sonido del sistema del micrófono") {
-                        cleanMicrophone()
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Button(cleaning ? "Limpiando…" : "Probar limpieza del micrófono") {
+                            cleanMicrophone()
+                        }
+                        .font(.system(size: 10))
+                        .disabled(cleaning)
+                        .help("Prueba a restar del micrófono lo que sonaba en el Mac. "
+                              + "Crea una PISTA NUEVA; tu grabación original no se toca "
+                              + "y puedes volver a ella cuando quieras.")
+                        // Deshacer: la limpieza es una prueba, no un camino sin vuelta.
+                        if hasCleanTrack {
+                            Button("Volver al original") { revertClean() }
+                                .font(.system(size: 10))
+                                .help("Quita la pista limpia y devuelve el micrófono de la grabación")
+                        }
+                        if let s = cleanStatus {
+                            Text(s).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
-                    .font(.system(size: 10))
-                    .disabled(cleaning)
-                    .help("Resta del micrófono lo que sonaba en el Mac, usando la "
-                          + "pista digital de la pantalla como referencia exacta")
-                    if let s = cleanStatus {
-                        Text(s).font(.caption2).foregroundStyle(.secondary)
-                    }
+                    Text("Opcional. El archivo original nunca se modifica: la voz limpia "
+                         + "se guarda aparte y puedes comparar y volver atrás.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             HStack {
@@ -639,6 +652,27 @@ struct AudioSection: View {
     @State private var cleaning = false
     @State private var cleanStatus: String? = nil
 
+    // ¿Hay ya una pista de voz limpia en el proyecto?
+    private var hasCleanTrack: Bool {
+        state.project.audioLayers.contains {
+            URL(fileURLWithPath: $0.path).lastPathComponent.hasPrefix("voz-limpia")
+        }
+    }
+
+    // Deshacer la prueba: fuera la pista limpia, vuelve el micrófono original.
+    // El archivo voz-limpia.wav se queda en la carpeta por si quiere volver a
+    // usarlo; lo que no se toca NUNCA es la grabación de cámara.
+    private func revertClean() {
+        var p = state.project
+        p.audioLayers.removeAll {
+            URL(fileURLWithPath: $0.path).lastPathComponent.hasPrefix("voz-limpia")
+        }
+        p.micVolume = 1
+        state.project = p
+        cleanStatus = "Micrófono original restaurado"
+        onStructureChange()
+    }
+
     private var hasSystemAudio: Bool {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: state.folder, includingPropertiesForKeys: nil)) ?? []
@@ -658,7 +692,14 @@ struct AudioSection: View {
         }
         cleaning = true
         cleanStatus = "Analizando…"
-        let out = state.folder.appendingPathComponent("voz-limpia.wav")
+        // Nombre libre: una limpieza nueva no pisa la anterior, por si quiere
+        // comparar dos intentos.
+        var n = 1
+        var out = state.folder.appendingPathComponent("voz-limpia.wav")
+        while FileManager.default.fileExists(atPath: out.path) {
+            n += 1
+            out = state.folder.appendingPathComponent("voz-limpia-\(n).wav")
+        }
         let folder = state.folder
         DispatchQueue.global(qos: .userInitiated).async {
             do {
@@ -675,7 +716,7 @@ struct AudioSection: View {
                     p.audioLayers.append(layer)
                     p.micVolume = 0
                     state.project = p
-                    cleanStatus = String(format: "%.0f dB menos de sonido del sistema",
+                    cleanStatus = String(format: "%.0f dB menos · compara y decide",
                                          -r.reductionDB)
                     onStructureChange()
                     _ = folder
