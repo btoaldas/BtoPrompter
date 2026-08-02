@@ -113,7 +113,16 @@ IMAGEN + SONIDO. Son 4 canales lógicos y el usuario combina los que quiera:
 - Permiso de micrófono: el que la app ya tiene; la acción es explícita.
 - La exportación hereda el audioMix (AVAssetExportSession.audioMix). HECHO.
 
-### 2c. QUINTA TANDA dictada (2026-08-01, noche) — SOLO PLANIFICADO, NO ejecutar aún
+### 2c. QUINTA TANDA — ✅ EJECUTADA (autorizada por Alberto con «GOAL TOTAL»)
+
+Todo lo de abajo quedó implementado: burnIn=false por defecto (SRT separado
+junto al MP4 + traducciones video.XX.srt al exportar), SubtitleAI
+(traducir/refinar con el proveedor del Ensayo IA, respuesta casada por
+longitud — jamás subtítulos corridos), DubbingEngine (traducción + TTS frase
+a frase con el proveedor de Lectura, capas de audio alineadas al segundo
+real, micrófono a cero, confirmación de costo). Verificado: traducción real
+a inglés y japonés con tiempos intactos; TTS ElevenLabs real de una frase
+doblada (3,1 s de audio). Plan original de referencia:
 
 **Subtítulos separados del vídeo (por defecto NO quemados):**
 - La decisión es POR PROYECTO y EN LA INTERFAZ (no una configuración global):

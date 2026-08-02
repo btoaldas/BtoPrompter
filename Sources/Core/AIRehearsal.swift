@@ -101,8 +101,8 @@ struct AIRehearsal {
     }
 
     // Llamada única a una API estilo OpenAI, compartida por el marcado de
-    // ritmo y por la construcción del perfil del orador.
-    private static func request(system: String, user: String, baseURL: String,
+    // ritmo, el perfil del orador y la IA de subtítulos.
+    static func request(system: String, user: String, baseURL: String,
                                 apiKey: String, model: String, temperature: Double,
                                 completion: @escaping (Result<String, Error>) -> Void) {
         guard let url = URL(string: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))

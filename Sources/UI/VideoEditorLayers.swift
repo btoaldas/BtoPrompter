@@ -696,7 +696,138 @@ struct SubtitleSection: View {
             }
 
             if state.project.subtitles?.enabled == true {
+                Toggle("Quemar en el vídeo (si no, salen como .srt separado)", isOn: Binding(
+                    get: { track.burnIn },
+                    set: { v in var t2 = track; t2.burnIn = v; setTrack(t2) }
+                ))
+                .font(.system(size: 11))
+                aiRow
                 stylePickers
+            }
+        }
+    }
+
+    @StateObject private var dubbing = DubbingEngine.shared
+    @State private var aiBusy = false
+    @State private var aiStatus: String? = nil
+
+    // Traducir (SRT por idioma, listos para YouTube), refinar el texto con la
+    // IA configurada, o DOBLAR el audio (traducción + TTS frase a frase).
+    private var aiRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Menu("Traducir…") {
+                    ForEach(SubtitleAI.languages, id: \.code) { lang in
+                        Button(lang.name) { translate(to: [lang]) }
+                    }
+                    Divider()
+                    Button("Los 10 idiomas") { translate(to: SubtitleAI.languages) }
+                }
+                .font(.system(size: 10))
+                .disabled(aiBusy || track.chunks.isEmpty)
+
+                Button("Refinar con IA") { refine() }
+                    .font(.system(size: 10))
+                    .disabled(aiBusy || track.chunks.isEmpty)
+
+                Menu("Doblar…") {
+                    ForEach(SubtitleAI.languages, id: \.code) { lang in
+                        Button(lang.name) { dub(lang) }
+                    }
+                }
+                .font(.system(size: 10))
+                .disabled(dubbing.running || track.chunks.isEmpty)
+            }
+            if aiBusy, let s = aiStatus {
+                Text(s).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let s = aiStatus, !aiBusy {
+                Text(s).font(.caption2).foregroundStyle(.orange)
+            }
+            if dubbing.running {
+                Text(dubbing.progress).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func translate(to langs: [(code: String, name: String)]) {
+        guard let config = SubtitleAI.ProviderConfig.current() else {
+            aiStatus = "Configura un proveedor de IA en Ajustes → Ensayo IA"
+            return
+        }
+        aiBusy = true
+        var remaining = langs
+        func next() {
+            guard let lang = remaining.first else {
+                aiBusy = false
+                aiStatus = "Traducciones guardadas junto al proyecto (.srt por idioma)"
+                return
+            }
+            remaining.removeFirst()
+            aiStatus = "Traduciendo al \(lang.name)…"
+            SubtitleAI.translate(track.chunks, to: lang.name, config: config) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let translated):
+                        let srt = SubtitleBuilder.toSRT(translated)
+                        let url = state.folder.appendingPathComponent("subtitulos.\(lang.code).srt")
+                        try? srt.write(to: url, atomically: true, encoding: .utf8)
+                    case .failure(let error):
+                        aiStatus = "\(lang.name): \(error.localizedDescription)"
+                    }
+                    next()
+                }
+            }
+        }
+        next()
+    }
+
+    private func refine() {
+        guard let config = SubtitleAI.ProviderConfig.current() else {
+            aiStatus = "Configura un proveedor de IA en Ajustes → Ensayo IA"
+            return
+        }
+        aiBusy = true
+        aiStatus = "Refinando \(track.chunks.count) frases…"
+        SubtitleAI.refine(track.chunks, config: config) { result in
+            DispatchQueue.main.async {
+                aiBusy = false
+                switch result {
+                case .success(let refined):
+                    var t2 = track
+                    t2.chunks = refined
+                    setTrack(t2)
+                    aiStatus = nil
+                case .failure(let error):
+                    aiStatus = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func dub(_ lang: (code: String, name: String)) {
+        // El costo es real (una llamada de TTS por frase): confirmar antes.
+        let alert = NSAlert()
+        alert.messageText = "Doblar al \(lang.name)"
+        alert.informativeText = "Se traducirán \(track.chunks.count) frases y se sintetizará "
+            + "cada una con el proveedor de voz de Ajustes → Lectura "
+            + "(\(track.chunks.count) llamadas). Las frases dobladas entran como capas de "
+            + "audio y el micrófono original se baja a cero (puedes devolverlo)."
+        alert.addButton(withTitle: "Doblar")
+        alert.addButton(withTitle: "Cancelar")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        DubbingEngine.shared.dub(chunks: track.chunks, language: lang,
+                                 folder: state.folder) { result in
+            switch result {
+            case .success(let layers):
+                var p = state.project
+                p.audioLayers.append(contentsOf: layers)
+                p.micVolume = 0
+                state.project = p
+                aiStatus = "Doblaje listo: \(layers.count) frases como capas de audio"
+                NotificationCenter.default.post(name: .init("BtoPrompterRebuild"), object: nil)
+            case .failure(let error):
+                aiStatus = error.localizedDescription
             }
         }
     }

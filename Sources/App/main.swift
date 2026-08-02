@@ -87,6 +87,39 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-compose"), CommandLine.a
     RunLoop.main.run()
 }
 
+// Traducción de subtítulos con la IA configurada: prueba reproducible.
+//   --test-translate <archivo.srt> <código-idioma>
+if let i = CommandLine.arguments.firstIndex(of: "--test-translate"), CommandLine.arguments.count > i + 2 {
+    let srtPath = CommandLine.arguments[i + 1]
+    let lang = CommandLine.arguments[i + 2]
+    guard let content = try? String(contentsOfFile: srtPath, encoding: .utf8) else {
+        print("ERROR: no se pudo leer \(srtPath)")
+        exit(1)
+    }
+    let chunks = SubtitleBuilder.parseSRT(content)
+    guard !chunks.isEmpty else {
+        print("ERROR: el SRT no tiene bloques válidos")
+        exit(1)
+    }
+    guard let config = SubtitleAI.ProviderConfig.current() else {
+        print("ERROR: sin proveedor de IA configurado (Ajustes → Ensayo IA)")
+        exit(1)
+    }
+    let name = SubtitleAI.languages.first(where: { $0.code == lang })?.name ?? lang
+    let sem = DispatchSemaphore(value: 0)
+    SubtitleAI.translate(chunks, to: name, config: config) { result in
+        switch result {
+        case .success(let translated):
+            print(SubtitleBuilder.toSRT(translated))
+        case .failure(let error):
+            print("ERROR: \(error.localizedDescription)")
+        }
+        sem.signal()
+    }
+    sem.wait()
+    exit(0)
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--test-pptx"), CommandLine.arguments.count > i + 1 {
     let url = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     print(SpeechStore.extractPPTX(url) ?? "ERROR: no se pudo extraer texto")

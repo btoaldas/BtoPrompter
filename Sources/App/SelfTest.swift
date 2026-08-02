@@ -272,6 +272,30 @@ enum SelfTest {
             expect(false, "la biblioteca de presets sobrevive al viaje por JSON")
         }
 
+        // SRT de ida y vuelta, y el casado de textos de la IA.
+        let outSRT = SubtitleBuilder.toSRT([
+            SubtitleChunk(from: 0.1, to: 2.5, text: "Hola mundo"),
+            SubtitleChunk(from: 3, to: 5.25, text: "Segunda frase"),
+        ])
+        let reparsed = SubtitleBuilder.parseSRT(outSRT)
+        expect(reparsed.count == 2 && reparsed[1].to == 5.25
+               && reparsed[0].text == "Hola mundo",
+               "el SRT generado se vuelve a leer intacto")
+        let baseChunks = [SubtitleChunk(from: 0, to: 2, text: "uno"),
+                          SubtitleChunk(from: 2, to: 4, text: "dos")]
+        if case .success(let mapped) = SubtitleAI.mapTexts(
+            "```json\n[\"one\", \"two\"]\n```", onto: baseChunks) {
+            expect(mapped[0].text == "one" && mapped[0].from == 0 && mapped[1].to == 4,
+                   "la traducción conserva los tiempos y limpia el markdown")
+        } else {
+            expect(false, "la traducción conserva los tiempos y limpia el markdown")
+        }
+        if case .failure = SubtitleAI.mapTexts("[\"solo uno\"]", onto: baseChunks) {
+            expect(true, "longitud distinta = error honesto, no subtítulos corridos")
+        } else {
+            expect(false, "longitud distinta = error honesto, no subtítulos corridos")
+        }
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",

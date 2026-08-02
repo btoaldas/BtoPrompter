@@ -269,6 +269,9 @@ struct VideoEditorView: View {
         }
         .frame(minWidth: 980, minHeight: 640)
         .task { await prepare() }
+        .onReceive(NotificationCenter.default.publisher(for: .init("BtoPrompterRebuild"))) { _ in
+            Task { await rebuild() }
+        }
         .onDisappear {
             if let obs = timeObserver { player?.removeTimeObserver(obs) }
             timeObserver = nil
@@ -431,6 +434,25 @@ struct VideoEditorView: View {
         state.selectedSegment = state.project.segmentIndex(at: seconds)
     }
 
+    // Los subtítulos separados viajan CON el vídeo: video.srt junto al MP4 y
+    // las traducciones que existan como video.<código>.srt, listos para
+    // subirlos a YouTube como pistas.
+    private func writeSubtitleFiles(next videoURL: URL) {
+        guard let track = state.project.subtitles, track.enabled,
+              !track.chunks.isEmpty, !track.burnIn else { return }
+        let base = videoURL.deletingPathExtension()
+        try? SubtitleBuilder.toSRT(track.chunks)
+            .write(to: base.appendingPathExtension("srt"), atomically: true, encoding: .utf8)
+        let fm = FileManager.default
+        for lang in SubtitleAI.languages {
+            let translated = folder.appendingPathComponent("subtitulos.\(lang.code).srt")
+            guard fm.fileExists(atPath: translated.path) else { continue }
+            let dest = URL(fileURLWithPath: base.path + ".\(lang.code).srt")
+            try? fm.removeItem(at: dest)
+            try? fm.copyItem(at: translated, to: dest)
+        }
+    }
+
     private func exportVideo() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.mpeg4Movie]
@@ -468,6 +490,7 @@ struct VideoEditorView: View {
                     CompositionParameters.shared.exportProject = nil
                     switch result {
                     case .success(let out):
+                        writeSubtitleFiles(next: out)
                         NSWorkspace.shared.activateFileViewerSelecting([out])
                     case .failure(let error):
                         exportError = error.localizedDescription

@@ -131,7 +131,8 @@ class PiPCompositor: NSObject, AVVideoCompositing {
                                               canvas: size, seconds: seconds,
                                               extraLayers: ordered,
                                               layerImages: layerImages,
-                                              subtitles: project.subtitles)
+                                              subtitles: project.subtitles,
+                                              subtitlePreview: !self.useExportSnapshot)
 
             // Fundido de entrada: durante la ventana de la transición se
             // compone TAMBIÉN el tramo saliente y se mezclan. El corte sigue
@@ -174,7 +175,8 @@ enum FrameComposer {
                         canvas: CGSize, seconds: Double = 0,
                         extraLayers: [ExtraLayer] = [],
                         layerImages: [UUID: CIImage] = [:],
-                        subtitles: SubtitleTrack? = nil) -> CIImage {
+                        subtitles: SubtitleTrack? = nil,
+                        subtitlePreview: Bool = false) -> CIImage {
         let base = composeBase(screen: screen, camera: camera, layout: layout,
                                background: background, canvas: canvas,
                                seconds: seconds, extraLayers: extraLayers,
@@ -185,8 +187,10 @@ enum FrameComposer {
             result = drawLayer(layer, image: layerImages[layer.id],
                                at: seconds, over: result, canvas: canvas)
         }
-        // Subtítulos quemados: siempre lo más arriba de todo.
-        if let track = subtitles, track.enabled,
+        // Subtítulos quemados SOLO si el proyecto lo pide (por defecto van
+        // como .srt separado junto al MP4). En la previsualización se
+        // muestran siempre que estén activados, para poder ajustar el estilo.
+        if let track = subtitles, track.enabled, track.burnIn || subtitlePreview,
            let chunk = track.chunk(at: seconds),
            let img = subtitleImage(chunk.text, style: track.style, canvas: canvas) {
             result = img.composited(over: result)

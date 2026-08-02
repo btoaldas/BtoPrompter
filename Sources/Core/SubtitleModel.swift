@@ -107,8 +107,24 @@ struct SubtitleStyle: Codable, Equatable {
 
 struct SubtitleTrack: Codable, Equatable {
     var enabled = true
+    // Por defecto los subtítulos NO se queman: van como archivo .srt separado
+    // junto al MP4 exportado (para subirlos a YouTube como pista). Quemarlos
+    // es la opción, no la norma. Decisión de Alberto, quinta tanda.
+    var burnIn = false
     var chunks: [SubtitleChunk] = []
     var style = SubtitleStyle()
+
+    init(enabled: Bool = true) {
+        self.enabled = enabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        burnIn = try c.decodeIfPresent(Bool.self, forKey: .burnIn) ?? false
+        chunks = try c.decodeIfPresent([SubtitleChunk].self, forKey: .chunks) ?? []
+        style = try c.decodeIfPresent(SubtitleStyle.self, forKey: .style) ?? SubtitleStyle()
+    }
 
     func chunk(at seconds: Double) -> SubtitleChunk? {
         chunks.first { seconds >= $0.from && seconds < $0.to }
@@ -210,6 +226,24 @@ enum SubtitleBuilder {
             result.append(SubtitleChunk(from: from, to: to, text: text))
         }
         return result.sorted { $0.from < $1.from }
+    }
+
+    // Chunks → texto SRT (el inverso del parser, para exportar separado).
+    static func toSRT(_ chunks: [SubtitleChunk]) -> String {
+        var blocks: [String] = []
+        for (i, c) in chunks.enumerated() {
+            blocks.append("\(i + 1)\n\(srtStamp(c.from)) --> \(srtStamp(c.to))\n\(c.text)")
+        }
+        return blocks.joined(separator: "\n\n") + "\n"
+    }
+
+    private static func srtStamp(_ seconds: Double) -> String {
+        let total = max(0, seconds)
+        let h = Int(total) / 3600
+        let m = (Int(total) % 3600) / 60
+        let s = Int(total) % 60
+        let ms = Int((total - Double(Int(total))) * 1000)
+        return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
     }
 
     private static func srtTime(_ raw: String) -> Double? {
