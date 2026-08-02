@@ -54,34 +54,55 @@ Dos fuentes de subtítulos:
 - El grabador escribe `subtitulos.jsonl` en cada grabación (palabra + segundo
   relativo al inicio real de la grabación = firstFrameTimes["camara"]).
 
-## 3. Capas de AUDIO
+## 3. Capas de AUDIO — ✅ base HECHA (commit 3a3c856) + AMPLIACIÓN dictada
 
-Hoy: el audio del montaje es SOLO el de la cámara. Alberto quiere:
-- Volumen por fuente: audio de cámara (micrófono), audio de pantalla (si algún
-  día se captura), y **audios subidos** (música de fondo bajita, efectos).
-- Cada audio subido con: volumen, **recorte del archivo** (usar del minuto 1 al
-  3 de un MP3 de 3 minutos) y **posición en el proyecto** (que suene del segundo
-  A al B del montaje).
+HECHO: `audioLayers` (volumen, recorte del archivo con sourceStart, posición
+con projectStart, duración), `micVolume`, AVMutableAudioMix en preview y
+export, sección Audio en el inspector. Verificado con tono medido a −31 dB.
 
-**Diseño propuesto:**
-- `var audioLayers: [AudioLayer]` con `{id, path, name, volume (0..1),
-  sourceStart (segundo del archivo donde empieza), projectStart, duration}`.
-- `CompositionBuilder`: una pista de audio más por AudioLayer
-  (insertTimeRange(sourceStart..., at: projectStart)) + `AVMutableAudioMix` con
-  volumen por pista (y el volumen de la cámara también expuesto).
-- UI: sección "Audio" en el inspector: fila por audio con volumen, desde/hasta
-  del archivo, desde del proyecto; + botón añadir. El volumen de "Micrófono
-  (cámara)" siempre visible.
-- La exportación hereda el audioMix (AVAssetExportSession.audioMix).
+### 3b. AMPLIACIÓN (dictado 2026-08-01, segunda tanda): audio y vídeo DESACOPLADOS por fuente
 
-## 4. Presets estilo OBS (plantillas en 3 niveles)
+El modelo mental correcto: el escritorio trae IMAGEN + SONIDO; la webcam trae
+IMAGEN + SONIDO. Son 4 canales lógicos y el usuario combina los que quiera:
+- Caso clave dictado: "solo la VISTA del escritorio con solo el SONIDO de la
+  webcam, sin que se vea la webcam" — y el inverso.
+- Decisión de diseño: NO partir en 4 capas visibles (ruido); las fuentes se
+  quedan como están y el DESACOPLE es de mezcla: la imagen la decide el modo
+  del tramo (solo pantalla / solo cámara / overlay / lado a lado) y el sonido
+  lo deciden los volúmenes independientes: `micVolume` (webcam, hecho) +
+  `screenAudioVolume` (NUEVO).
+- Requisito previo: hoy la grabación de pantalla NO captura audio
+  (`capturesAudio = false`). Nueva opción parametrizable en Ajustes →
+  Grabación: **"Sonido del sistema en la grabación de pantalla"** (OFF por
+  defecto) → `SCStreamConfiguration.capturesAudio = true` → pantalla-*.mov
+  con pista de audio. El builder añade esa pista con su volumen propio.
+
+### 3c. VOZ EN OFF (dictado): N capas grabables desde el editor
+
+- Botón "🎙 Grabar voz en off" en la sección Audio: graba del micrófono EN EL
+  MOMENTO (AVAudioRecorder → `voz-off-<stamp>.m4a` en la carpeta del
+  proyecto) y al parar se añade como AudioLayer con `projectStart` = donde
+  estaba el cursor al empezar a grabar.
+- N capas de voz en off, cada una posicionable en los segundos que quiera,
+  con volumen y recorte como cualquier otro audio. Es ADICIONAL, nunca
+  reemplazo del micrófono de la grabación original.
+- Mientras graba: indicador rojo + cronómetro; opcional reproducir el vídeo
+  en paralelo (para narrar viendo la imagen) — versión 1: solo grabar.
+- Permiso de micrófono: el que la app ya tiene; la acción es explícita.
+- La exportación hereda el audioMix (AVAssetExportSession.audioMix). HECHO.
+
+## 4. Presets estilo OBS (plantillas en 4 niveles — afinado en la segunda tanda)
 
 Modelo mental de Alberto = OBS: escenas → componentes → configuraciones.
+CUATRO niveles (dictado): características de capa, componente, escena,
+proyecto completo.
 
+- **Preset de CARACTERÍSTICAS (estilo)**: solo la apariencia — forma, borde,
+  opacidad, ajuste — SIN geometría. Aplicable a cualquier capa sin moverla.
 - **Preset de COMPONENTE (capa)**: geometría + forma + ajuste + opacidad con
   nombre. Aplicable a cualquier capa.
 - **Preset de ESCENA (tramo)**: el `SegmentLayout` completo + las capas que
-  participan con sus posiciones.
+  participan con sus posiciones (y su orden del tramo).
 - **Preset de PROYECTO (plantilla)**: N cortes con sus escenas y componentes.
   **Fuentes placeholder**: si la plantilla usa archivos que no existen en el
   proyecto destino, se guardan como "demo 1", "demo 2"… y al aplicar la
@@ -120,14 +141,17 @@ tramos (pedido explícito: nada de que el corte deje de ser corte).
 - Capítulos incrustados en el archivo MP4.
 (Ambos anotados por si algún día los pide con otras palabras.)
 
-## Orden de implementación sugerido (cada pieza = commit + verificación)
+## Orden de implementación (cada pieza = commit + verificación)
 
-1. Z-order por tramo + menú contextual completo (posiciones). ← lo más pedido
-2. Arrastrar cortes en la timeline (barato, muy visible).
-3. Transiciones (fade primero; slide después).
-4. Capas de audio (pistas + audioMix + UI).
-5. Subtítulos (grabador escribe subtitulos.jsonl + capa quemada + SRT).
-6. Presets OBS (componente → escena → plantilla con placeholders).
+1. ✅ Z-order por tramo + menú contextual completo (commit 357bab9)
+2. ✅ Arrastrar cortes en la timeline (commit b25c092)
+3. ✅ Transiciones fade (commit b25c092)
+4. ✅ Capas de audio base (commit 3a3c856)
+5. Sonido del sistema en la grabación de pantalla + screenAudioVolume (3b).
+6. Voz en off grabable, N capas (3c).
+7. Subtítulos (grabador escribe subtitulos.jsonl + capa quemada + SRT).
+8. Presets OBS en 4 niveles (características → componente → escena →
+   plantilla con placeholders demo).
 
 ## Reglas que siguen vigentes
 
