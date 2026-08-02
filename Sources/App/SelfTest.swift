@@ -296,6 +296,22 @@ enum SelfTest {
             expect(false, "longitud distinta = error honesto, no subtítulos corridos")
         }
 
+        // Alineación de las piezas de una grabación: el que arrancó ANTES es
+        // el que tiene metraje de sobra, no al revés (ese era el fallo que
+        // dejaba la voz, la imagen y el escritorio cada uno por su lado).
+        let d1 = CompositionBuilder.alignmentDelays(
+            offsets: ["camara": 0, "pantalla": 0.3])
+        expect(d1["camara"] == 0.3 && d1["pantalla"] == 0,
+               "el que arrancó antes se salta la diferencia; el último no se toca")
+        let d2 = CompositionBuilder.alignmentDelays(
+            offsets: ["camara": 2.0, "pantalla": 0.5, "voz": 0])
+        expect(d2["voz"] == 2.0 && d2["pantalla"] == 1.5 && d2["camara"] == 0,
+               "con tres piezas todas se alinean al arranque más tardío")
+        expect(CompositionBuilder.alignmentDelays(offsets: ["camara": 1.2]) == ["camara": 0],
+               "una sola pieza no se recorta")
+        expect(CompositionBuilder.alignmentDelays(offsets: [:]).isEmpty,
+               "sin piezas no hay nada que alinear")
+
         let failover = VoiceProviderCatalog.configuredOrder(
             primary: .deepgram,
             rawFallbacks: "soniox,deepgram,apple_local",

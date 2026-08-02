@@ -13,7 +13,6 @@ struct RecordingSettingsTab: View {
     @State private var mic = Settings.bool(.recordMicInRecording, default: true)
     @State private var sysAudio = Settings.bool(.recordSystemAudio, default: false)
     @State private var audioCopies = Settings.bool(.recordAudioCopies, default: false)
-    @State private var echoCancel = Settings.bool(.recordEchoCancellation, default: false)
     @State private var chapters = Settings.bool(.recordChapters, default: false)
     @State private var autoPlay = Settings.bool(.recordAutoPlayPrompter, default: true)
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
@@ -56,13 +55,12 @@ struct RecordingSettingsTab: View {
                          + "del escritorio con el audio que quieras: micrófono, sistema o ambos.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Toggle("Cancelar el eco del sistema en el micrófono", isOn: $echoCancel)
-                        .onChange(of: echoCancel) { v in Settings.set(v, .recordEchoCancellation) }
-                    Text("Si mientras hablas suena algo en el Mac, el micrófono lo capta por "
-                         + "los altavoces y queda duplicado. Con esto el micrófono se graba "
-                         + "aparte, limpio, con la misma tecnología que usan Zoom y Teams.")
+                    Text("Si grabas el sonido del sistema Y hablas por el micrófono a la "
+                         + "vez, el micrófono captará también lo que suena por los altavoces. "
+                         + "Está medido: macOS no puede borrarlo del micrófono. Para separar "
+                         + "de verdad tu voz del sonido del Mac, usa auriculares.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
                     Toggle("Guardar además copias solo-audio (.m4a)", isOn: $audioCopies)
                         .onChange(of: audioCopies) { v in Settings.set(v, .recordAudioCopies) }
                     Text("El audio siempre va dentro de los vídeos; esto extrae ADEMÁS "

@@ -65,6 +65,36 @@ pintadas en la previsualización.
 - PENDIENTE: usar los proveedores STT de nube que la app ya tiene
   (Deepgram, ElevenLabs…) cuando el usuario los prefiera, para audio difícil.
 
+## 4b. Aislar la voz del sonido del sistema — MEDIDO, PENDIENTE de hacer bien
+
+Problema real (Alberto, 2026-08-01): al grabar el sonido del sistema Y hablar,
+el micrófono capta también lo que sale por los altavoces y la voz queda
+duplicada.
+
+**Lo que se probó y NO sirve** (medido en esta Mac, no supuesto):
+- `setVoiceProcessingEnabled(true)` (la cancelación de eco de macOS, la misma
+  familia que usan Zoom y Teams) **no borra del micrófono el audio de OTRAS
+  apps**. Solo lo ATENÚA: con el atenuado activo el micrófono salía limpio
+  (−64 dB) pero el sonido del sistema quedaba casi mudo (−54 dB) — justo lo
+  que hay que conservar. Con el atenuado al mínimo el sistema se oye bien
+  (−28 dB) pero el micrófono vuelve a captarlo (−25 dB). No hay punto medio.
+- Además, grabar el micrófono en un archivo aparte **descuadraba el montaje**:
+  arrancaba ~2 s antes que la cámara. Se retiró; el micrófono vuelve a ir
+  dentro del archivo de cámara, sincronizado por construcción.
+
+**Lo que SÍ puede funcionar (pendiente):**
+1. **Auriculares** — cero código, separación perfecta. Es la respuesta
+   práctica y hay que decirla en la interfaz (ya se dice).
+2. **Cancelación en POST-proceso**: tenemos la pista del sistema en DIGITAL
+   (dentro de pantalla-*.mov, capturada por ScreenCaptureKit, sin pasar por
+   el aire) y la del micrófono. Con la referencia perfecta se puede restar:
+   alinear por correlación cruzada y aplicar un filtro adaptativo (NLMS).
+   Es MEJOR que la cancelación en vivo, porque la referencia es exacta.
+   Ojo: hay que compensar el retardo acústico + de salida, medido en ~0,38 s
+   en esta Mac.
+3. **Puerta por referencia** (más simple, menos fino): bajar el micrófono
+   automáticamente cuando la pista del sistema esté sonando fuerte.
+
 ## 5. Ideas propias que encajan con esto
 
 - **Cursor resaltado**: un halo suave siguiendo el puntero en la grabación de

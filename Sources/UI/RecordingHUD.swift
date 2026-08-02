@@ -97,6 +97,20 @@ struct RecordingHUDView: View {
                 .foregroundColor(.white.opacity(0.35))
                 .help("Arrastra desde aquí para mover el mando")
 
+            // Un fallo (la pantalla no se graba, la cámara no arrancó) tiene
+            // que verse AQUÍ: el estado de Ajustes no lo mira nadie mientras
+            // graba. Amarillo, con el motivo en el globo, y se descarta al
+            // pulsarlo.
+            if let err = engine.lastError {
+                Button { engine.lastError = nil } label: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.yellow)
+                }
+                .buttonStyle(.plain)
+                .help(err)
+            }
+
             switch engine.phase {
             case .idle:
                 button("record.circle.fill", .red, "Grabar (⌘R)") { engine.start() }

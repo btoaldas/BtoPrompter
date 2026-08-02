@@ -27,6 +27,12 @@ final class RecordingEngine: NSObject, ObservableObject {
         didSet { RemoteControl.shared.broadcastIfRunning() }
     }
     @Published var status: String? = nil
+    // Canal de ERROR separado del estado: el estado se sobrescribe con
+    // «Grabando…» y los avisos se perdían. Este no se pisa y lo pinta el
+    // mando flotante, que es donde el usuario está mirando.
+    @Published var lastError: String? = nil
+    // Piezas que el usuario pidió y NO se están grabando.
+    @Published var missingPieces: [String] = []
     @Published var lastFolder: URL? = nil
     // Marca de tiempo del inicio real, para los capítulos.
     private var startedAt: Date? = nil
@@ -46,8 +52,6 @@ final class RecordingEngine: NSObject, ObservableObject {
     private var screenOutput: Any?
 
     private var countdownWork: DispatchWorkItem?
-    // Micrófono con cancelación de eco (camino alternativo al de la cámara).
-    private let cleanMic = VoiceIsolatedRecorder()
     // Detecta el PRIMER fotograma real de la cámara. session.isRunning se pone
     // en true antes de que fluya imagen; grabar en ese hueco pierde el inicio.
     private final class FrameSentinel: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -73,10 +77,6 @@ final class RecordingEngine: NSObject, ObservableObject {
     static var wantChapters: Bool { Settings.bool(.recordChapters, default: false) }
     static var wantSystemAudio: Bool { Settings.bool(.recordSystemAudio, default: false) }
     static var wantAudioCopies: Bool { Settings.bool(.recordAudioCopies, default: false) }
-    // Cancelar el eco: el micrófono deja de captar lo que suena en el Mac.
-    static var wantEchoCancellation: Bool {
-        Settings.bool(.recordEchoCancellation, default: false)
-    }
     // Al terminar la cuenta regresiva, el teleprompter arranca solo: si
     // estás grabando es porque vas a hablar. Se puede apagar en Ajustes.
     static var wantAutoPlayPrompter: Bool {
@@ -202,6 +202,10 @@ final class RecordingEngine: NSObject, ObservableObject {
         chapterMarks = []
         subtitleWords = []
         firstFrameTimes = [:]
+        lastError = nil
+        missingPieces = []
+        let wantedCamera = Self.wantCamera
+        let wantedScreen = Self.wantScreen
         status = nil
 
         // El hardware tarda segundos en despertar. Primero se PREPARA todo
@@ -235,14 +239,6 @@ final class RecordingEngine: NSObject, ObservableObject {
                 return
             }
             self.startedAt = Date()
-            // Micrófono limpio: se arranca junto a las cámaras. Si el sistema
-            // no puede con la cancelación de eco, se avisa y la toma sigue.
-            if Self.wantMic, Self.wantEchoCancellation {
-                let micURL = folder.appendingPathComponent("microfono-\(stamp).caf")
-                if !self.cleanMic.start(to: micURL) {
-                    self.status = self.cleanMic.lastError ?? "Sin cancelación de eco"
-                }
-            }
             self.pausedRanges = []
             self.pauseStartedAt = nil
             self.elapsedText = "0:00"
@@ -264,8 +260,19 @@ final class RecordingEngine: NSObject, ObservableObject {
                 self.pendingScreenURL = screenURL
                 self.startPendingScreen()
             }
+            // Lo que el usuario pidió y no salió: se dice, no se oculta tras
+            // un «Grabando…» tranquilizador.
+            var missing: [String] = []
+            if wantedCamera, !pieces.contains("cámara") { missing.append("cámara") }
+            if wantedScreen, !pieces.contains("pantalla") { missing.append("pantalla") }
+            self.missingPieces = missing
             self.phase = .recording
             self.status = "Grabando " + pieces.sorted().joined(separator: " + ")
+            if !missing.isEmpty {
+                let falta = missing.joined(separator: " y ")
+                self.lastError = "NO se está grabando: \(falta). "
+                    + (self.lastError ?? "")
+            }
             // El prompter arranca con la grabación: nada de grabar diez
             // segundos de silencio buscando la tecla de play. Solo si ya
             // estás en el prompter y no se está reproduciendo.
@@ -310,12 +317,20 @@ final class RecordingEngine: NSObject, ObservableObject {
         try? lines.joined(separator: "\n")
             .write(to: folder.appendingPathComponent("sync.txt"), atomically: true, encoding: .utf8)
         // Versión para máquinas: el editor de composición la lee para alinear.
-        if let cam = firstFrameTimes["camara"], let scr = firstFrameTimes["pantalla"] {
-            let payload: [String: Any] = [
-                "offsetSeconds": scr.timeIntervalSince(cam),
-                "camera": "camara-\(folder.lastPathComponent).mov",
-                "screen": "pantalla-\(folder.lastPathComponent).mov",
+        // La referencia es la primera pieza que arrancó: todo se mide contra
+        // ella, así el montaje puede correr cada archivo lo justo.
+        if let base = firstFrameTimes.values.min() {
+            var payload: [String: Any] = [
+                "cameraOffset": (firstFrameTimes["camara"] ?? base).timeIntervalSince(base),
+                "screenOffset": (firstFrameTimes["pantalla"] ?? base).timeIntervalSince(base),
             ]
+            if let mic = firstFrameTimes["microfono"] {
+                payload["micOffset"] = mic.timeIntervalSince(base)
+            }
+            // Compatibilidad con los proyectos ya grabados.
+            if let cam = firstFrameTimes["camara"], let scr = firstFrameTimes["pantalla"] {
+                payload["offsetSeconds"] = scr.timeIntervalSince(cam)
+            }
             if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
                 try? data.write(to: folder.appendingPathComponent("sync.json"))
             }
@@ -349,7 +364,6 @@ final class RecordingEngine: NSObject, ObservableObject {
     }
 
     private func finishStop() {
-        cleanMic.stop()
         cameraSession?.stopRunning()
         cameraSession = nil
         cameraOutput = nil
@@ -360,7 +374,15 @@ final class RecordingEngine: NSObject, ObservableObject {
         writeSubtitleTrack()
         extractAudioCopies()
         phase = .idle
-        status = "Grabación guardada"
+        // No se declara «guardada» sin mirar: si no hay archivos, se dice.
+        let saved = (try? FileManager.default.contentsOfDirectory(
+            atPath: lastFolder?.path ?? ""))?.filter { $0.hasSuffix(".mov") } ?? []
+        if saved.isEmpty {
+            status = "No se guardó ningún vídeo"
+            lastError = "La grabación terminó sin producir ningún archivo de vídeo"
+        } else {
+            status = "Grabación guardada (\(saved.count) archivo\(saved.count == 1 ? "" : "s"))"
+        }
         if let f = lastFolder {
             // Con el editor activado y las DOS piezas grabadas, se ofrece
             // componer de una vez; si no, se enseña la carpeta como siempre.
@@ -388,14 +410,19 @@ final class RecordingEngine: NSObject, ObservableObject {
         guard let cam = device, let input = try? AVCaptureDeviceInput(device: cam),
               session.canAddInput(input) else {
             status = "Cámara no disponible"
+            lastError = "La cámara elegida no está disponible (¿desconectada?)"
             done(false)
             return
         }
         session.addInput(input)
-        // Con la cancelación de eco el micrófono se graba aparte (limpio); si
-        // también entrara por la cámara, tendríamos la voz duplicada, una
-        // sucia y otra limpia.
-        if Self.wantMic, !Self.wantEchoCancellation,
+        // El micrófono va SIEMPRE dentro del archivo de cámara: así comparte
+        // reloj con la imagen y la voz cuadra con los labios por construcción.
+        // Se intentó grabarlo aparte con la cancelación de eco de macOS y se
+        // retiró: medido, macOS NO borra del micrófono el sonido que otras
+        // apps sacan por los altavoces (solo lo atenúa, dejando mudo lo que
+        // hay que conservar), y el archivo aparte arrancaba dos segundos
+        // antes que la cámara, descuadrando todo el montaje.
+        if Self.wantMic,
            let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
            session.canAddInput(micInput) {
@@ -444,6 +471,16 @@ final class RecordingEngine: NSObject, ObservableObject {
 
     // Deja la captura corriendo SIN escribir; la escritura llega después.
     private func prepareScreen(_ done: @escaping (Bool) -> Void) {
+        // El permiso se comprueba ANTES: sin él, la captura fallaba y la
+        // grabación seguía solo con cámara sin que nadie se enterara.
+        guard CGPreflightScreenCaptureAccess() else {
+            lastError = "Falta el permiso de Grabación de pantalla. "
+                + "Actívalo en Ajustes del Sistema → Privacidad y seguridad → "
+                + "Grabación de pantalla, y reinicia BtoPrompter."
+            CGRequestScreenCaptureAccess()
+            done(false)
+            return
+        }
         guard #available(macOS 15.0, *) else {
             status = "Grabar la pantalla necesita macOS 15 o superior (la cámara sí funciona)"
             done(false)
@@ -455,6 +492,7 @@ final class RecordingEngine: NSObject, ObservableObject {
                                                                                    onScreenWindowsOnly: true)
                 guard let display = content.displays.first else {
                     status = "No se encontró la pantalla"
+                    lastError = "No se encontró ninguna pantalla que grabar"
                     done(false)
                     return
                 }
@@ -477,12 +515,13 @@ final class RecordingEngine: NSObject, ObservableObject {
                 }
                 config.showsCursor = true
 
-                let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+                let stream = SCStream(filter: filter, configuration: config, delegate: self)
                 try await stream.startCapture()
                 screenStream = stream
                 done(true)
             } catch {
                 status = "Pantalla: \(error.localizedDescription)"
+                lastError = "La pantalla no se pudo preparar: \(error.localizedDescription)"
                 done(false)
             }
         }
@@ -501,6 +540,10 @@ final class RecordingEngine: NSObject, ObservableObject {
             screenOutput = recording
         } catch {
             status = "Pantalla: \(error.localizedDescription)"
+            lastError = "La pantalla NO se está grabando: \(error.localizedDescription)"
+            missingPieces.append("pantalla")
+            screenStream?.stopCapture { _ in }
+            screenStream = nil
         }
     }
 
@@ -546,6 +589,15 @@ final class RecordingEngine: NSObject, ObservableObject {
         }
         let url = folder.appendingPathComponent("capitulos.txt")
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func handleScreenFailure(_ error: Error) {
+        guard phase == .recording || phase == .paused else { return }
+        screenStream = nil
+        screenOutput = nil
+        if !missingPieces.contains("pantalla") { missingPieces.append("pantalla") }
+        lastError = "La captura de pantalla se cortó: \(error.localizedDescription)"
+        status = lastError
     }
 
     // MARK: - Copias solo-audio
@@ -615,5 +667,18 @@ extension RecordingEngine: AVCaptureFileOutputRecordingDelegate {
 extension RecordingEngine: SCRecordingOutputDelegate {
     nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
         Task { @MainActor in noteFirstFrame("pantalla") }
+    }
+
+    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput,
+                                     didFailWithError error: Error) {
+        Task { @MainActor in RecordingEngine.shared.handleScreenFailure(error) }
+    }
+}
+
+// Si la captura de pantalla se cae a mitad de la grabación, había que
+// enterarse: antes moría en silencio y el vídeo quedaba truncado.
+extension RecordingEngine: SCStreamDelegate {
+    nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
+        Task { @MainActor in RecordingEngine.shared.handleScreenFailure(error) }
     }
 }

@@ -704,12 +704,26 @@ enum FrameComposer {
 
 enum CompositionBuilder {
 
+    // Cuánto hay que saltarse del principio de cada archivo para que todos
+    // empiecen en el MISMO instante real. El que arrancó antes tiene metraje
+    // de más; el último no se toca. Función pura, probada en --selftest:
+    // aquí vivía el fallo que descuadraba la voz, la imagen y el escritorio.
+    static func alignmentDelays(offsets: [String: Double]) -> [String: Double] {
+        guard let latest = offsets.values.max() else { return [:] }
+        return offsets.mapValues { max(0, latest - $0) }
+    }
+
+
     struct Sources {
         let screenURL: URL?
         let cameraURL: URL?
         let offsetSeconds: Double   // pantalla − cámara, del sync.json
-        // Micrófono grabado aparte con cancelación de eco, si lo hay.
-        var cleanMicURL: URL? = nil
+        // Cuánto tarde arrancó CADA pieza respecto a la primera. Cada archivo
+        // tiene su propio instante: aplicar a la voz el desfase de la cámara
+        // (lo que se hacía antes) descuadraba todo.
+        var cameraOffset: Double = 0
+        var screenOffset: Double = 0
+        var micOffset: Double = 0
     }
 
     // Carga una carpeta de grabación (los dos .mov + sync.json). Las fuentes
@@ -721,10 +735,19 @@ enum CompositionBuilder {
         var cam = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") })
         var scr = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") })
         var offset = 0.0
+        var camOff = 0.0, scrOff = 0.0, micOff = 0.0
         if let data = try? Data(contentsOf: folder.appendingPathComponent("sync.json")),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let o = json["offsetSeconds"] as? Double {
-            offset = o
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let o = json["offsetSeconds"] as? Double { offset = o }
+            camOff = json["cameraOffset"] as? Double ?? 0
+            scrOff = json["screenOffset"] as? Double ?? 0
+            micOff = json["micOffset"] as? Double ?? camOff
+            // Grabaciones antiguas: solo traían el desfase pantalla−cámara.
+            if json["cameraOffset"] == nil {
+                camOff = max(0, -offset)
+                scrOff = max(0, offset)
+                micOff = camOff
+            }
         }
         if let data = try? Data(contentsOf: VideoProjectStore.projectURL(inFolder: folder)),
            let project = try? JSONDecoder().decode(VideoProject.self, from: data) {
@@ -740,9 +763,8 @@ enum CompositionBuilder {
         // Con UNA sola pieza también se puede componer (recortes y fondo
         // siguen valiendo); la grabación de fábrica es solo-cámara.
         guard cam != nil || scr != nil else { return nil }
-        let cleanMic = files.first { $0.lastPathComponent.hasPrefix("microfono-") }
         return Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset,
-                       cleanMicURL: cleanMic)
+                       cameraOffset: camOff, screenOffset: scrOff, micOffset: micOff)
     }
 
     // Composición alineada y recortada a la pista más corta. La regla dura:
@@ -767,9 +789,20 @@ enum CompositionBuilder {
         // El archivo que empezó tarde se corre hacia delante; ambos rebasan a
         // cero en disco, así que el desfase del sidecar es la única verdad.
         // Con una sola fuente el desfase no aplica.
-        let both = screenTrack != nil && cameraTrack != nil
-        let camDelay = both ? max(0, -src.offsetSeconds) : 0
-        let scrDelay = both ? max(0, src.offsetSeconds) : 0
+        // Cada archivo empezó a escribir en su propio instante y el sidecar
+        // guarda cuánto tarde arrancó cada uno respecto al primero. El que
+        // arrancó ANTES tiene metraje de más al principio: hay que saltárselo.
+        // El montaje empieza donde ya existían todas las piezas — el arranque
+        // más tardío — y a cada archivo se le salta la diferencia.
+        // (Ojo: es al revés de lo que parece; recortarle su propio desfase a
+        // cada uno descuadraba todo, que es lo que se veía al reproducir.)
+        var named: [String: Double] = [:]
+        if cameraTrack != nil { named["camara"] = src.cameraOffset }
+        if screenTrack != nil { named["pantalla"] = src.screenOffset }
+        let delays = alignmentDelays(offsets: named)
+        let camDelay = delays["camara"] ?? 0
+        let scrDelay = delays["pantalla"] ?? 0
+        let micDelay = camDelay   // la voz viaja dentro del archivo de cámara
         let screenDur = try await screenAsset?.load(.duration).seconds ?? .infinity
         let cameraDur = try await cameraAsset?.load(.duration).seconds ?? .infinity
         let usable = min(screenDur - scrDelay, cameraDur - camDelay)
@@ -798,14 +831,12 @@ enum CompositionBuilder {
             cameraID = vCamera.trackID
         }
 
-        // El micrófono: el archivo limpio (sin eco del sistema) si existe, si
-        // no el que va dentro del archivo de cámara.
+        // El micrófono viaja dentro del archivo de cámara, con su volumen.
         var mixParams: [AVMutableAudioMixInputParameters] = []
-        let micAsset: AVURLAsset? = src.cleanMicURL.map { AVURLAsset(url: $0) } ?? cameraAsset
-        if let audio = try await micAsset?.loadTracks(withMediaType: .audio).first {
+        if let audio = try await cameraAsset?.loadTracks(withMediaType: .audio).first {
             let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
             try aTrack.insertTimeRange(
-                CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),
+                CMTimeRange(start: CMTime(seconds: micDelay, preferredTimescale: 600), duration: duration),
                 of: audio, at: .zero)
             let params = AVMutableAudioMixInputParameters(track: aTrack)
             params.setVolume(Float(micVolume), at: .zero)
