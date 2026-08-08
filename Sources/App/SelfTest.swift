@@ -312,6 +312,44 @@ enum SelfTest {
         expect(CompositionBuilder.alignmentDelays(offsets: [:]).isEmpty,
                "sin piezas no hay nada que alinear")
 
+        // Colocación de partes tras un corte: cada una cae en su instante y
+        // el hueco queda a la vista; la parte 1 se salta lo que sobra antes
+        // del cero del montaje.
+        typealias Place = CompositionBuilder.PartPlacement
+        let solo = CompositionBuilder.placeParts([(offset: 0.14, dur: 390)],
+                                                 latest: 0.14, usable: 389.86)
+        expect(solo == [Place(sourceStart: 0, start: 0, length: 389.86)],
+               "una parte única se monta entera desde el cero")
+        let adelantada = CompositionBuilder.placeParts([(offset: 0, dur: 100)],
+                                                       latest: 0.3, usable: 99.7)
+        expect(adelantada == [Place(sourceStart: 0.3, start: 0, length: 99.7)],
+               "la pieza que arrancó antes se salta la diferencia (mismo trato que alignmentDelays)")
+        let corte = CompositionBuilder.placeParts(
+            [(offset: 0.14, dur: 390), (offset: 405, dur: 2895)],
+            latest: 0.14, usable: 3299.86)
+        if corte.count == 2, let p1 = corte[0], let p2 = corte[1] {
+            expect(p1 == Place(sourceStart: 0, start: 0, length: 390),
+                   "la parte 1 llega hasta el corte")
+            expect(abs(p2.start - 404.86) < 0.001 && abs(p2.length - 2895) < 0.001
+                   && p2.sourceStart == 0,
+                   "la parte 2 cae en su instante real y deja el hueco a la vista")
+        } else {
+            expect(false, "un corte produce dos partes montadas")
+        }
+        let solapada = CompositionBuilder.placeParts(
+            [(offset: 0, dur: 100), (offset: 50, dur: 100)],
+            latest: 0, usable: 150)
+        if solapada.count == 2, let s1 = solapada[0], let s2 = solapada[1] {
+            expect(s1.length == 100 && s2.start == 100 && s2.sourceStart == 50
+                   && s2.length == 50,
+                   "un sidecar con solape no rompe: la posterior se recorta por delante")
+        } else {
+            expect(false, "el solape defensivo conserva ambas partes")
+        }
+        let fuera = CompositionBuilder.placeParts([(offset: 500, dur: 100)],
+                                                  latest: 0, usable: 90)
+        expect(fuera == [nil], "una parte que cae fuera del montaje se descarta sin reventar")
+
         // Rampa del zoom: el acercamiento va del encuadre completo al recorte.
         let destino = SourceCrop(x: 0.3, y: 0.2, width: 0.4, height: 0.4)
         let inicio = destino.ramped(progress: 0)

@@ -882,6 +882,14 @@ enum CompositionBuilder {
     }
 
 
+    // Una parte física de una pieza: el archivo y su instante real de
+    // arranque (offsetSeconds del sync.json, medido contra la primera pieza
+    // que arrancó). Tras un corte a mitad de toma hay varias.
+    struct SourcePart {
+        let url: URL
+        let offset: Double
+    }
+
     struct Sources {
         let screenURL: URL?
         let cameraURL: URL?
@@ -892,11 +900,20 @@ enum CompositionBuilder {
         var cameraOffset: Double = 0
         var screenOffset: Double = 0
         var micOffset: Double = 0
+        // TODAS las partes de cada pieza, en orden de arranque. El montaje
+        // coloca cada una en su instante y el hueco del corte queda a la
+        // vista (fondo) en vez de descartar en silencio todo lo recuperado.
+        var screenParts: [SourcePart] = []
+        var cameraParts: [SourcePart] = []
     }
 
     // Carga una carpeta de grabación (los dos .mov + sync.json). Las fuentes
     // PROPIAS del proyecto mandan: el usuario puede poner su vídeo en lugar
     // de la pantalla o de la cámara grabadas, o aportarlas si no existen.
+    // Montar las partes recuperadas es parametrizable; apagado, se compone
+    // solo la parte 1 (comportamiento clásico) y el editor avisa del resto.
+    static var wantMountParts: Bool { Settings.bool(.editorMountParts, default: true) }
+
     static func sources(inFolder folder: URL) -> Sources? {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
@@ -904,6 +921,8 @@ enum CompositionBuilder {
         var scr = primaryFile(prefix: "pantalla-", in: files)
         var offset = 0.0
         var camOff = 0.0, scrOff = 0.0, micOff = 0.0
+        var screenSegs: [SourcePart] = []
+        var cameraSegs: [SourcePart] = []
         if let data = try? Data(contentsOf: folder.appendingPathComponent("sync.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if let o = json["offsetSeconds"] as? Double { offset = o }
@@ -916,23 +935,49 @@ enum CompositionBuilder {
                 scrOff = max(0, offset)
                 micOff = camOff
             }
+            // Si hubo cortes, el blindaje dejó el instante real de cada
+            // parte; solo cuentan las que siguen existiendo en disco.
+            func segs(_ key: String) -> [SourcePart] {
+                guard let raw = json[key] as? [[String: Any]] else { return [] }
+                return raw.compactMap { entry -> SourcePart? in
+                    guard let f = entry["file"] as? String,
+                          let o = entry["offsetSeconds"] as? Double else { return nil }
+                    let url = folder.appendingPathComponent(f)
+                    guard fm.fileExists(atPath: url.path) else { return nil }
+                    return SourcePart(url: url, offset: o)
+                }.sorted { $0.offset < $1.offset }
+            }
+            if wantMountParts {
+                screenSegs = segs("screenSegments")
+                cameraSegs = segs("cameraSegments")
+            }
         }
         if let data = try? Data(contentsOf: VideoProjectStore.projectURL(inFolder: folder)),
            let project = try? JSONDecoder().decode(VideoProject.self, from: data) {
             if let c = project.cameraOverridePath, fm.fileExists(atPath: c) {
                 cam = URL(fileURLWithPath: c)
                 offset = 0   // el desfase medido solo vale para lo grabado junto
+                cameraSegs = []   // el archivo del usuario es una sola parte
             }
             if let s = project.screenOverridePath, fm.fileExists(atPath: s) {
                 scr = URL(fileURLWithPath: s)
                 offset = 0
+                screenSegs = []
             }
         }
         // Con UNA sola pieza también se puede componer (recortes y fondo
         // siguen valiendo); la grabación de fábrica es solo-cámara.
         guard cam != nil || scr != nil else { return nil }
-        return Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset,
-                       cameraOffset: camOff, screenOffset: scrOff, micOffset: micOff)
+        var src = Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset,
+                          cameraOffset: camOff, screenOffset: scrOff, micOffset: micOff)
+        // Con registro de cortes mandan los segmentos (traen el instante REAL
+        // de cada parte, aunque solo sobreviva una); sin registro, la pieza
+        // es una sola parte con su desfase del sidecar.
+        src.screenParts = !screenSegs.isEmpty ? screenSegs
+            : (scr.map { [SourcePart(url: $0, offset: scrOff)] } ?? [])
+        src.cameraParts = !cameraSegs.isEmpty ? cameraSegs
+            : (cam.map { [SourcePart(url: $0, offset: camOff)] } ?? [])
+        return src
     }
 
     // Tras un corte a mitad de toma hay varias partes (pantalla-<fecha>.mov,
@@ -946,77 +991,209 @@ enum CompositionBuilder {
                  < ($1.lastPathComponent.count, $1.lastPathComponent) }
     }
 
-    // Composición alineada y recortada a la pista más corta. La regla dura:
-    // las instrucciones deben teselar [0, duración] sin huecos ni solapes, o
-    // la exportación revienta con -11841 (aquí: una sola instrucción total).
+    // Qué partes de la carpeta NO van a aparecer en el montaje, con su motivo:
+    // sin registro en sync.json (o montaje apagado), ilegibles, o fuera del
+    // alcance porque la otra pieza termina antes. Repite la matemática de
+    // build() con las duraciones reales — estar en sources no basta: el aviso
+    // honesto se decide con lo que placeParts de verdad coloca.
+    static func unmountedParts(inFolder folder: URL, sources src: Sources) async
+        -> [(file: String, reason: String)] {
+        var out: [(file: String, reason: String)] = []
+        let fm = FileManager.default
+        let all = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        let registered = Set((src.screenParts + src.cameraParts).map { $0.url.lastPathComponent })
+        for f in all where f.lastPathComponent.contains(".parte")
+                && f.pathExtension.lowercased() == "mov"
+                && !registered.contains(f.lastPathComponent) {
+            out.append((f.lastPathComponent,
+                        "sin registro en sync.json o con el montaje de partes apagado"))
+        }
+        struct Probe { let file: String; let offset: Double; let dur: Double }
+        func probe(_ parts: [SourcePart]) async -> [Probe] {
+            var res: [Probe] = []
+            for p in parts.sorted(by: { $0.offset < $1.offset }) {
+                let asset = AVURLAsset(url: p.url)
+                guard let v = try? await asset.loadTracks(withMediaType: .video).first,
+                      let range = try? await v.load(.timeRange),
+                      range.end.seconds > 0.05 else {
+                    if p.url.lastPathComponent.contains(".parte") {
+                        out.append((p.url.lastPathComponent, "ilegible: sin vídeo utilizable"))
+                    }
+                    continue
+                }
+                res.append(Probe(file: p.url.lastPathComponent,
+                                 offset: p.offset, dur: range.end.seconds))
+            }
+            return res
+        }
+        let scr = await probe(src.screenParts)
+        let cam = await probe(src.cameraParts)
+        var named: [Double] = []
+        if !cam.isEmpty { named.append(src.cameraOffset) }
+        if !scr.isEmpty { named.append(src.screenOffset) }
+        let latest = named.max() ?? 0
+        func coverage(_ ps: [Probe]) -> Double {
+            ps.map { $0.offset - latest + $0.dur }.max() ?? .infinity
+        }
+        let usable = min(scr.isEmpty ? .infinity : coverage(scr),
+                         cam.isEmpty ? .infinity : coverage(cam))
+        for ps in [scr, cam] {
+            let placements = placeParts(ps.map { ($0.offset, $0.dur) },
+                                        latest: latest, usable: usable)
+            for (p, place) in zip(ps, placements)
+                where place == nil && p.file.contains(".parte") {
+                out.append((p.file, "fuera del montaje: la otra pieza termina antes"))
+            }
+        }
+        return out
+    }
+
+    // Dónde cae cada parte en la línea de tiempo del montaje. PURA y probada
+    // en --selftest. Entrada YA ordenada por arranque; salida alineada 1:1
+    // con la entrada (nil = la parte queda fuera). `latest` es el arranque de
+    // la pieza que más tardó (el cero del montaje) y `usable` la duración
+    // total. La parte 1 puede arrancar ANTES del cero: se le salta ese
+    // metraje. Las siguientes caen después, dejando a la vista el hueco del
+    // corte que las separó.
+    struct PartPlacement: Equatable {
+        let sourceStart: Double   // qué saltarse del principio del archivo
+        let start: Double         // dónde empieza en el montaje
+        let length: Double
+    }
+
+    static func placeParts(_ parts: [(offset: Double, dur: Double)],
+                           latest: Double, usable: Double) -> [PartPlacement?] {
+        var prevEnd = 0.0
+        return parts.map { p in
+            let compStart = p.offset - latest
+            var skip = max(0, -compStart)
+            var at = max(0, compStart)
+            // Defensa: las partes no deben solaparse; si el sidecar trae algo
+            // raro, la posterior se recorta por delante.
+            if at < prevEnd {
+                skip += prevEnd - at
+                at = prevEnd
+            }
+            let length = min(p.dur - skip, usable - at)
+            guard length > 0.05 else { return nil }
+            prevEnd = at + length
+            return PartPlacement(sourceStart: skip, start: at, length: length)
+        }
+    }
+
+    // Composición alineada. La regla dura: las instrucciones deben teselar
+    // [0, duración] sin huecos ni solapes, o la exportación revienta con
+    // -11841 (aquí: una sola instrucción total). Los huecos de las PISTAS sí
+    // están permitidos: el compositor pinta el fondo cuando una pieza no
+    // tiene fotograma en ese instante.
     static func build(_ src: Sources, extraLayers: [ExtraLayer] = [],
                       audioLayers: [AudioLayer] = [], micVolume: Double = 1.0,
                       screenAudioVolume: Double = 1.0) async throws
         -> (composition: AVMutableComposition, video: AVMutableVideoComposition,
             duration: Double, audioMix: AVAudioMix?) {
-        let screenAsset = src.screenURL.map { AVURLAsset(url: $0) }
-        let cameraAsset = src.cameraURL.map { AVURLAsset(url: $0) }
+        // Partes de cada pieza; si Sources llegó construido a mano, la
+        // principal hace de parte única con su desfase.
+        let screenPartList = !src.screenParts.isEmpty ? src.screenParts
+            : (src.screenURL.map { [SourcePart(url: $0, offset: src.screenOffset)] } ?? [])
+        let cameraPartList = !src.cameraParts.isEmpty ? src.cameraParts
+            : (src.cameraURL.map { [SourcePart(url: $0, offset: src.cameraOffset)] } ?? [])
 
         let comp = AVMutableComposition()
-        let screenTrack = try await screenAsset?.loadTracks(withMediaType: .video).first
-        let cameraTrack = try await cameraAsset?.loadTracks(withMediaType: .video).first
-        guard screenTrack != nil || cameraTrack != nil else {
+
+        // Cada parte con su asset, duración y pistas; las que no tienen vídeo
+        // (restos de un intento fallido) se descartan enteras.
+        struct LoadedPart {
+            let asset: AVURLAsset
+            let offset: Double
+            let dur: Double
+            let video: AVAssetTrack
+            let audio: AVAssetTrack?
+        }
+        func load(_ parts: [SourcePart]) async -> [LoadedPart] {
+            var out: [LoadedPart] = []
+            for p in parts.sorted(by: { $0.offset < $1.offset }) {
+                let asset = AVURLAsset(url: p.url)
+                // La duración que manda es la de la pista de VÍDEO, no la del
+                // asset: en las partes del reinicio el audio dura ~0.14 s más
+                // y con asset.duration el final del montaje quedaba en fondo
+                // puro (fotogramas sin fuente) con el audio aún sonando.
+                guard let v = try? await asset.loadTracks(withMediaType: .video).first,
+                      let range = try? await v.load(.timeRange),
+                      range.end.seconds > 0.05
+                else { continue }
+                let a = try? await asset.loadTracks(withMediaType: .audio).first
+                out.append(LoadedPart(asset: asset, offset: p.offset, dur: range.end.seconds,
+                                      video: v, audio: a ?? nil))
+            }
+            return out
+        }
+        let screenLoaded = await load(screenPartList)
+        let cameraLoaded = await load(cameraPartList)
+        guard !screenLoaded.isEmpty || !cameraLoaded.isEmpty else {
             throw NSError(domain: "CompositionBuilder", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Ningún archivo tiene pista de vídeo"])
         }
 
         // El archivo que empezó tarde se corre hacia delante; ambos rebasan a
         // cero en disco, así que el desfase del sidecar es la única verdad.
-        // Con una sola fuente el desfase no aplica.
-        // Cada archivo empezó a escribir en su propio instante y el sidecar
-        // guarda cuánto tarde arrancó cada uno respecto al primero. El que
-        // arrancó ANTES tiene metraje de más al principio: hay que saltárselo.
         // El montaje empieza donde ya existían todas las piezas — el arranque
         // más tardío — y a cada archivo se le salta la diferencia.
         // (Ojo: es al revés de lo que parece; recortarle su propio desfase a
         // cada uno descuadraba todo, que es lo que se veía al reproducir.)
         var named: [String: Double] = [:]
-        if cameraTrack != nil { named["camara"] = src.cameraOffset }
-        if screenTrack != nil { named["pantalla"] = src.screenOffset }
-        let delays = alignmentDelays(offsets: named)
-        let camDelay = delays["camara"] ?? 0
-        let scrDelay = delays["pantalla"] ?? 0
-        let micDelay = camDelay   // la voz viaja dentro del archivo de cámara
-        let screenDur = try await screenAsset?.load(.duration).seconds ?? .infinity
-        let cameraDur = try await cameraAsset?.load(.duration).seconds ?? .infinity
-        let usable = min(screenDur - scrDelay, cameraDur - camDelay)
-        guard usable > 0.1 else {
+        if !cameraLoaded.isEmpty { named["camara"] = src.cameraOffset }
+        if !screenLoaded.isEmpty { named["pantalla"] = src.screenOffset }
+        let latest = named.values.max() ?? 0
+        // El montaje ya no se recorta a la parte 1: dura hasta donde llegue
+        // la última parte de la pieza que antes termine.
+        func coverage(_ parts: [LoadedPart]) -> Double {
+            parts.map { $0.offset - latest + $0.dur }.max() ?? .infinity
+        }
+        let usable = min(screenLoaded.isEmpty ? .infinity : coverage(screenLoaded),
+                         cameraLoaded.isEmpty ? .infinity : coverage(cameraLoaded))
+        guard usable > 0.1, usable.isFinite else {
             throw NSError(domain: "CompositionBuilder", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Las grabaciones no se solapan en el tiempo"])
         }
         let duration = CMTime(seconds: usable, preferredTimescale: 600)
 
+        // Inserta las partes de una pieza en una pista del montaje, cada una
+        // en su instante; los huecos quedan vacíos y el compositor pinta el
+        // fondo. La misma matemática vale para el vídeo y para su audio.
+        func insert(_ parts: [LoadedPart], into track: AVMutableCompositionTrack,
+                    pick: (LoadedPart) -> AVAssetTrack?) {
+            let placements = placeParts(parts.map { ($0.offset, $0.dur) },
+                                        latest: latest, usable: usable)
+            for (part, place) in zip(parts, placements) {
+                guard let place, let source = pick(part) else { continue }
+                try? track.insertTimeRange(
+                    CMTimeRange(start: CMTime(seconds: place.sourceStart, preferredTimescale: 600),
+                                duration: CMTime(seconds: place.length, preferredTimescale: 600)),
+                    of: source, at: CMTime(seconds: place.start, preferredTimescale: 600))
+            }
+        }
+
         var screenID = kCMPersistentTrackID_Invalid
-        if let screenTrack {
+        if !screenLoaded.isEmpty {
             let vScreen = comp.addMutableTrack(withMediaType: .video,
                                                preferredTrackID: kCMPersistentTrackID_Invalid)!
-            try vScreen.insertTimeRange(
-                CMTimeRange(start: CMTime(seconds: scrDelay, preferredTimescale: 600), duration: duration),
-                of: screenTrack, at: .zero)
+            insert(screenLoaded, into: vScreen) { $0.video }
             screenID = vScreen.trackID
         }
         var cameraID = kCMPersistentTrackID_Invalid
-        if let cameraTrack {
+        if !cameraLoaded.isEmpty {
             let vCamera = comp.addMutableTrack(withMediaType: .video,
                                                preferredTrackID: kCMPersistentTrackID_Invalid)!
-            try vCamera.insertTimeRange(
-                CMTimeRange(start: CMTime(seconds: camDelay, preferredTimescale: 600), duration: duration),
-                of: cameraTrack, at: .zero)
+            insert(cameraLoaded, into: vCamera) { $0.video }
             cameraID = vCamera.trackID
         }
 
         // El micrófono viaja dentro del archivo de cámara, con su volumen.
         var mixParams: [AVMutableAudioMixInputParameters] = []
-        if let audio = try await cameraAsset?.loadTracks(withMediaType: .audio).first {
-            let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
-            try aTrack.insertTimeRange(
-                CMTimeRange(start: CMTime(seconds: micDelay, preferredTimescale: 600), duration: duration),
-                of: audio, at: .zero)
+        if cameraLoaded.contains(where: { $0.audio != nil }) {
+            let aTrack = comp.addMutableTrack(withMediaType: .audio,
+                                              preferredTrackID: kCMPersistentTrackID_Invalid)!
+            insert(cameraLoaded, into: aTrack) { $0.audio }
             let params = AVMutableAudioMixInputParameters(track: aTrack)
             params.setVolume(Float(micVolume), at: .zero)
             mixParams.append(params)
@@ -1025,12 +1202,10 @@ enum CompositionBuilder {
         // El sonido del SISTEMA vive en el archivo de pantalla (si la
         // grabación lo capturó). Su volumen es independiente del micrófono:
         // así se ve el escritorio con el audio de la webcam, o al revés.
-        if let sysAudio = try await screenAsset?.loadTracks(withMediaType: .audio).first {
+        if screenLoaded.contains(where: { $0.audio != nil }) {
             let aTrack = comp.addMutableTrack(withMediaType: .audio,
                                               preferredTrackID: kCMPersistentTrackID_Invalid)!
-            try aTrack.insertTimeRange(
-                CMTimeRange(start: CMTime(seconds: scrDelay, preferredTimescale: 600), duration: duration),
-                of: sysAudio, at: .zero)
+            insert(screenLoaded, into: aTrack) { $0.audio }
             let params = AVMutableAudioMixInputParameters(track: aTrack)
             params.setVolume(Float(screenAudioVolume), at: .zero)
             mixParams.append(params)

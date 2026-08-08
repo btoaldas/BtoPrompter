@@ -690,6 +690,15 @@ struct AudioSection: View {
             cleanStatus = "Hacen falta la cámara y la pantalla"
             return
         }
+        // Con cortes la limpieza aún no sabe de partes: limpiaría solo la
+        // parte 1 y al silenciar el micrófono ENMUDECERÍA la voz del resto
+        // de la toma. Mejor negarse con la verdad que romper el audio.
+        if let src = CompositionBuilder.sources(inFolder: state.folder),
+           src.cameraParts.count > 1 || src.screenParts.count > 1 {
+            cleanStatus = "Esta toma tuvo cortes: la limpieza aún no funciona "
+                + "con partes (dejaría sin voz todo lo posterior al corte)"
+            return
+        }
         cleaning = true
         cleanStatus = "Analizando…"
         // Nombre libre: una limpieza nueva no pisa la anterior, por si quiere
@@ -949,7 +958,20 @@ struct SubtitleSection: View {
     @StateObject private var transcriber = SubtitleTranscriber.shared
 
     // Transcribe el audio de la grabación: subtítulos sin haber leído guion.
+    // Con cortes se transcribe CADA parte y sus tiempos se corren al instante
+    // real de la parte en el montaje; antes solo salía la parte 1 y los
+    // subtítulos morían en el primer hueco.
     private func transcribeAudio() {
+        if let src = CompositionBuilder.sources(inFolder: state.folder) {
+            let parts = !src.cameraParts.isEmpty ? src.cameraParts : src.screenParts
+            if parts.count > 1 {
+                var named: [Double] = []
+                if !src.cameraParts.isEmpty { named.append(src.cameraOffset) }
+                if !src.screenParts.isEmpty { named.append(src.screenOffset) }
+                transcribeParts(parts, latest: named.max() ?? 0)
+                return
+            }
+        }
         guard let audio = SubtitleTranscriber.bestAudioSource(inFolder: state.folder) else {
             aiStatus = "No se encontró audio en esta grabación"
             return
@@ -967,6 +989,46 @@ struct SubtitleSection: View {
                 aiStatus = error.localizedDescription
             }
         }
+    }
+
+    // Una parte tras otra (el transcriptor es de a uno), acumulando frases
+    // ya corridas al reloj del montaje.
+    private func transcribeParts(_ parts: [CompositionBuilder.SourcePart], latest: Double) {
+        aiStatus = "Transcribiendo \(parts.count) partes…"
+        var all: [SubtitleChunk] = []
+        var failures = 0
+        func next(_ i: Int) {
+            guard i < parts.count else {
+                guard !all.isEmpty else {
+                    aiStatus = "No se pudo transcribir ninguna parte"
+                    return
+                }
+                var t2 = track
+                t2.chunks = all.sorted { $0.from < $1.from }
+                t2.enabled = true
+                setTrack(t2)
+                aiStatus = "\(all.count) frases desde el audio (\(parts.count) partes"
+                    + (failures > 0 ? ", \(failures) fallaron)" : ")")
+                return
+            }
+            let part = parts[i]
+            aiStatus = "Transcribiendo parte \(i + 1) de \(parts.count)…"
+            let shift = part.offset - latest
+            transcriber.transcribe(url: part.url) { result in
+                if case .success(let chunks) = result {
+                    all.append(contentsOf: chunks.map { c in
+                        var c2 = c
+                        c2.from = max(0, c.from + shift)
+                        c2.to = max(c2.from, c.to + shift)
+                        return c2
+                    })
+                } else {
+                    failures += 1
+                }
+                next(i + 1)
+            }
+        }
+        next(0)
     }
 
     @State private var silenceStatus: String? = nil

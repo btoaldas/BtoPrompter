@@ -582,11 +582,13 @@ struct VideoProject: Codable, Equatable {
 
     func sanitized() -> VideoProject {
         var p = self
-        // duration <= 0 significa "aún no se conoce": los cortes se conservan.
-        // Filtrarlos aquí destruía el proyecto guardado al reabrir el editor,
-        // que carga primero y conoce la duración después.
-        p.cuts = Array(Set(p.cuts)).sorted()
-            .filter { $0 > 0 && (p.duration <= 0 || $0 < p.duration) }
+        // Los cortes NUNCA se filtran por duración: la duración depende del
+        // contexto (con las partes recuperadas montadas la toma es larga; con
+        // el montaje apagado o sin sync.json se encoge a la parte 1) y
+        // recortar aquí DESTRUÍA al guardar los cortes posteriores al primer
+        // hueco. Un corte más allá del final es inofensivo: su tramo nunca
+        // se alcanza.
+        p.cuts = Array(Set(p.cuts)).sorted().filter { $0 > 0 }
         // Reparar el invariante si el JSON venía mal de fuera.
         while p.layouts.count < p.cuts.count + 1 { p.layouts.append(p.layouts.last ?? SegmentLayout()) }
         while p.layouts.count > p.cuts.count + 1 { p.layouts.removeLast() }

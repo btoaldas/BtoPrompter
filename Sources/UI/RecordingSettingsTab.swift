@@ -23,6 +23,7 @@ struct RecordingSettingsTab: View {
     @State private var cameraDevice = Settings.string(.recordCameraDevice, default: "")
     @State private var cameras: [(id: String, name: String)] = []
     @State private var editor = Settings.bool(.videoEditorEnabled, default: false)
+    @State private var mountParts = Settings.bool(.editorMountParts, default: true)
 
     var body: some View {
         Form {
@@ -143,6 +144,13 @@ struct RecordingSettingsTab: View {
                         .onChange(of: editor) { v in Settings.set(v, .videoEditorEnabled) }
                     Text("Junta cámara y pantalla en un solo vídeo con presets (círculo, "
                          + "lado a lado…) y exporta MP4. El cambio en el menú se aplica al reabrir la app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Montar las partes recuperadas tras un corte", isOn: $mountParts)
+                        .onChange(of: mountParts) { v in Settings.set(v, .editorMountParts) }
+                    Text("Si una toma tuvo cortes (parte2, parte3…), cada parte se coloca en "
+                         + "su instante real del montaje y el hueco queda a la vista (fondo). "
+                         + "Apagado: se monta solo la parte 1 y el editor avisa del resto.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

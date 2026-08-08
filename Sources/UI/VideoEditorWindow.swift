@@ -62,26 +62,26 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             alert.runModal()
             return
         }
-        warnAboutExtraParts(in: target)
+        warnAboutExtraParts(in: target, sources: sources)
         openEditorWindow(target: target, sources: sources)
     }
 
-    // Tras un corte a mitad de toma hay .parteN.mov que el montaje de hoy no
-    // coloca solo: se avisa en vez de descartarlos en silencio. Los archivos
-    // están ahí y sync.txt trae el instante exacto de cada parte.
-    private func warnAboutExtraParts(in folder: URL) {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: nil)) ?? []
-        let parts = files.filter { $0.lastPathComponent.contains(".parte")
-            && $0.pathExtension.lowercased() == "mov" }
-        guard !parts.isEmpty else { return }
-        let alert = NSAlert()
-        alert.messageText = "Esta grabación tuvo cortes: hay partes sin montar"
-        alert.informativeText = "El editor compone la parte 1 de cada pieza. Quedan fuera:\n"
-            + parts.map { "• \($0.lastPathComponent)" }.sorted().joined(separator: "\n")
-            + "\n\nsync.txt y sync.json traen el instante real de cada parte para "
-            + "añadirlas como capas en su sitio."
-        alert.runModal()
+    // Las partes recuperadas tras un corte se montan solas en su instante.
+    // Este aviso queda para las que de VERDAD no van a aparecer, con su
+    // motivo — se decide con la misma matemática del montaje, no con listas.
+    private func warnAboutExtraParts(in folder: URL, sources: CompositionBuilder.Sources) {
+        Task { @MainActor in
+            let missing = await CompositionBuilder.unmountedParts(inFolder: folder,
+                                                                  sources: sources)
+            guard !missing.isEmpty else { return }
+            let alert = NSAlert()
+            alert.messageText = "Esta grabación tiene partes que no saldrán en el montaje"
+            alert.informativeText = missing.sorted { $0.file < $1.file }
+                .map { "• \($0.file): \($0.reason)" }.joined(separator: "\n")
+                + "\n\nLos archivos siguen en la carpeta; sync.txt trae el instante "
+                + "real de cada parte para añadirlas como capas a mano."
+            alert.runModal()
+        }
     }
 
     private func openEditorWindow(target: URL, sources: CompositionBuilder.Sources) {
