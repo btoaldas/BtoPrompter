@@ -685,8 +685,8 @@ struct AudioSection: View {
     private func cleanMicrophone() {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: state.folder, includingPropertiesForKeys: nil)) ?? []
-        guard let mic = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") }),
-              let ref = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") }) else {
+        guard let mic = CompositionBuilder.primaryFile(prefix: "camara-", in: files),
+              let ref = CompositionBuilder.primaryFile(prefix: "pantalla-", in: files) else {
             cleanStatus = "Hacen falta la cámara y la pantalla"
             return
         }

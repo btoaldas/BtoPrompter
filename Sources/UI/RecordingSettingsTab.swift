@@ -16,6 +16,9 @@ struct RecordingSettingsTab: View {
     @State private var chapters = Settings.bool(.recordChapters, default: false)
     @State private var keystrokes = Settings.bool(.recordKeystrokes, default: false)
     @State private var autoPlay = Settings.bool(.recordAutoPlayPrompter, default: true)
+    @State private var keepAwake = Settings.bool(.recordKeepAwake, default: true)
+    @State private var autoRestart = Settings.bool(.recordAutoRestart, default: true)
+    @State private var failureSound = Settings.bool(.recordFailureSound, default: true)
     @State private var countdown = Settings.int(.recordCountdown, default: 3)
     @State private var cameraDevice = Settings.string(.recordCameraDevice, default: "")
     @State private var cameras: [(id: String, name: String)] = []
@@ -91,6 +94,29 @@ struct RecordingSettingsTab: View {
                     Toggle("Capítulos automáticos al cruzar cada guía", isOn: $chapters)
                         .onChange(of: chapters) { v in Settings.set(v, .recordChapters) }
                     Text("Queda un capitulos.txt junto a los vídeos con la hora de cada sección.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Blindaje de la grabación") {
+                    Toggle("Mantener el Mac despierto mientras se graba", isOn: $keepAwake)
+                        .onChange(of: keepAwake) { v in Settings.set(v, .recordKeepAwake) }
+                    Text("Ni la pantalla se apaga ni el Mac se duerme, a batería o enchufado. "
+                         + "Sin esto, la captura de pantalla muere cuando la pantalla se apaga.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Reanudar solo si una captura se corta", isOn: $autoRestart)
+                        .onChange(of: autoRestart) { v in Settings.set(v, .recordAutoRestart) }
+                    Text("Si la pantalla o la cámara se cortan (cambio de resolución, monitor "
+                         + "desconectado, bloqueo…), se reintenta hasta recuperarlas y la toma "
+                         + "sigue en un archivo nuevo (parte2, parte3…) sin perder lo grabado. "
+                         + "Incluye un vigilante que detecta escrituras congeladas.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Aviso sonoro si una pieza deja de grabarse", isOn: $failureSound)
+                        .onChange(of: failureSound) { v in Settings.set(v, .recordFailureSound) }
+                    Text("Un pitido insistente mientras falte una pieza. Se cuela en el "
+                         + "micrófono: mejor eso que descubrir al final que falta media toma.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -62,7 +62,26 @@ final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             alert.runModal()
             return
         }
+        warnAboutExtraParts(in: target)
         openEditorWindow(target: target, sources: sources)
+    }
+
+    // Tras un corte a mitad de toma hay .parteN.mov que el montaje de hoy no
+    // coloca solo: se avisa en vez de descartarlos en silencio. Los archivos
+    // están ahí y sync.txt trae el instante exacto de cada parte.
+    private func warnAboutExtraParts(in folder: URL) {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: nil)) ?? []
+        let parts = files.filter { $0.lastPathComponent.contains(".parte")
+            && $0.pathExtension.lowercased() == "mov" }
+        guard !parts.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Esta grabación tuvo cortes: hay partes sin montar"
+        alert.informativeText = "El editor compone la parte 1 de cada pieza. Quedan fuera:\n"
+            + parts.map { "• \($0.lastPathComponent)" }.sorted().joined(separator: "\n")
+            + "\n\nsync.txt y sync.json traen el instante real de cada parte para "
+            + "añadirlas como capas en su sitio."
+        alert.runModal()
     }
 
     private func openEditorWindow(target: URL, sources: CompositionBuilder.Sources) {

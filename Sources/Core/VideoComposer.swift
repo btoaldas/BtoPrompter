@@ -900,8 +900,8 @@ enum CompositionBuilder {
     static func sources(inFolder folder: URL) -> Sources? {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        var cam = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") })
-        var scr = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") })
+        var cam = primaryFile(prefix: "camara-", in: files)
+        var scr = primaryFile(prefix: "pantalla-", in: files)
         var offset = 0.0
         var camOff = 0.0, scrOff = 0.0, micOff = 0.0
         if let data = try? Data(contentsOf: folder.appendingPathComponent("sync.json")),
@@ -933,6 +933,17 @@ enum CompositionBuilder {
         guard cam != nil || scr != nil else { return nil }
         return Sources(screenURL: scr, cameraURL: cam, offsetSeconds: offset,
                        cameraOffset: camOff, screenOffset: scrOff, micOffset: micOff)
+    }
+
+    // Tras un corte a mitad de toma hay varias partes (pantalla-<fecha>.mov,
+    // pantalla-<fecha>.parte2.mov…) y el orden de carpeta no es determinista:
+    // la pieza principal es siempre la de nombre más corto (la parte 1).
+    static func primaryFile(prefix: String, in files: [URL],
+                            ext: String = "mov") -> URL? {
+        files.filter { $0.lastPathComponent.hasPrefix(prefix)
+                       && $0.pathExtension.lowercased() == ext }
+            .min { ($0.lastPathComponent.count, $0.lastPathComponent)
+                 < ($1.lastPathComponent.count, $1.lastPathComponent) }
     }
 
     // Composición alineada y recortada a la pista más corta. La regla dura:

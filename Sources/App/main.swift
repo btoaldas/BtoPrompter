@@ -94,8 +94,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--test-echo"), CommandLine.argu
     let folder = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
     let files = (try? FileManager.default.contentsOfDirectory(at: folder,
                                                               includingPropertiesForKeys: nil)) ?? []
-    guard let mic = files.first(where: { $0.lastPathComponent.hasPrefix("camara-") }),
-          let ref = files.first(where: { $0.lastPathComponent.hasPrefix("pantalla-") }) else {
+    guard let mic = CompositionBuilder.primaryFile(prefix: "camara-", in: files),
+          let ref = CompositionBuilder.primaryFile(prefix: "pantalla-", in: files) else {
         print("ERROR: hacen falta la cámara (micrófono) y la pantalla (referencia)")
         exit(1)
     }

@@ -24,9 +24,15 @@ final class SubtitleTranscriber: ObservableObject {
     nonisolated static func bestAudioSource(inFolder folder: URL) -> URL? {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        let preferred = ["audio-webcam-", "camara-", "audio-sistema-", "pantalla-"]
-        for prefix in preferred {
-            if let hit = files.first(where: { $0.lastPathComponent.hasPrefix(prefix) }) {
+        // Con cortes hay varias partes por pieza: siempre la parte 1, elegida
+        // determinísticamente (el orden de carpeta no lo es).
+        let preferred: [(prefix: String, ext: String)] = [
+            ("audio-webcam-", "m4a"), ("camara-", "mov"),
+            ("audio-sistema-", "m4a"), ("pantalla-", "mov"),
+        ]
+        for p in preferred {
+            if let hit = CompositionBuilder.primaryFile(prefix: p.prefix, in: files,
+                                                        ext: p.ext) {
                 return hit
             }
         }

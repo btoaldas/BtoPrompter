@@ -28,6 +28,7 @@ enum Settings {
         case recordSystemAudio, recordAudioCopies, recordAutoPlayPrompter
         case recordHUD, recordHUDPosition, recordEchoCancellation, recordDuckingLevel
         case recordKeystrokes
+        case recordKeepAwake, recordAutoRestart, recordFailureSound
         case videoEditorEnabled
         // Claves históricas de la v1.0 (migradas a la biblioteca).
         case legacyScript = "script"
